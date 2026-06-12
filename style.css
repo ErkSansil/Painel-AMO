@@ -244,6 +244,20 @@ button { cursor: pointer; font-family: inherit; }
 .login-btn:active { transform: scale(.97); }
 .login-btn:disabled { opacity: .6; cursor: wait; }
 
+.login-esqueci {
+  display: inline-block;
+  margin-top: 18px;
+  font-size: 13px;
+  color: rgba(255,255,255,.75);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: color .2s, border-color .2s;
+}
+.login-esqueci:hover {
+  color: #fff;
+  border-bottom-color: rgba(255,255,255,.6);
+}
+
 /* ===== SIDEBAR ===== */
 .sidebar {
   width: var(--sidebar-w);
