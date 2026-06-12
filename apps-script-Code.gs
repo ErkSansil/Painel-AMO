@@ -31,7 +31,9 @@ function doGet(e) {
 
   try {
     if (action === 'dados') {
-      result = getDados();
+      // Exige credenciais válidas para ver os dados
+      const auth = validarCredencial(e.parameter.usuario, e.parameter.senha);
+      result = auth.ok ? getDados() : { ok: false, erro: 'Não autorizado' };
     } else if (action === 'login') {
       result = login(e.parameter.usuario, e.parameter.senha);
     } else if (action === 'ping') {
@@ -270,6 +272,26 @@ function atualizarStatusOffline(sh, idx) {
     }
     if (stale) sh.getRange(i + 2, idx.status).setValue('Offline');
   }
+}
+
+/** Confere usuário/senha sem efeitos colaterais (não mexe em status/acesso).
+ *  Usada para proteger a leitura dos dados. */
+function validarCredencial(usuario, senha) {
+  if (!usuario || !senha) return { ok: false };
+
+  const sh = abaCred();
+  const idx = colunasCred(sh);
+  const linha = linhaDoUsuario(sh, idx, usuario);
+  if (!linha) return { ok: false };
+
+  const senhaPlanilha = String(sh.getRange(linha, idx.senha).getValue()).trim();
+  if (senhaPlanilha !== String(senha).trim()) return { ok: false };
+
+  if (idx.situacao) {
+    const sit = normHeader(sh.getRange(linha, idx.situacao).getValue());
+    if (sit.includes('suspens')) return { ok: false };
+  }
+  return { ok: true };
 }
 
 function login(usuario, senha) {

@@ -56,10 +56,28 @@ async function fetchData() {
     state.data = getMockData();
     return;
   }
+  // Sem sessão, não busca (a tela de login está na frente mesmo)
+  if (!sessao.usuario) return;
   try {
-    const res = await fetch(`${SHEETS_API_URL}?action=dados`);
+    const params = new URLSearchParams({
+      action: 'dados',
+      usuario: sessao.usuario,
+      senha: sessao.senha,
+    });
+    const res = await fetch(`${SHEETS_API_URL}?${params}`);
     const json = await res.json();
-    if (!json.ok) throw new Error(json.erro);
+    if (!json.ok) {
+      // Credencial inválida ou suspensa no meio da sessão? Volta pro login.
+      if (json.erro === 'Não autorizado') {
+        ['sessaoUsuario', 'sessaoSenha', 'sessaoNivel'].forEach(k => {
+          localStorage.removeItem(k);
+          sessionStorage.removeItem(k);
+        });
+        location.reload();
+        return;
+      }
+      throw new Error(json.erro);
+    }
     rawRows = { sede: json.sede, filial: json.filial };
     state.data = {
       sede: agregarRows(filtrarPorData(rawRows.sede)),
