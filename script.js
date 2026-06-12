@@ -1,3 +1,22 @@
+/* ============================================================
+   PAINEL AMO — script.js
+   ------------------------------------------------------------
+   Toda a lógica do painel vive aqui: sessão/login, busca de
+   dados na planilha (via Apps Script), filtros, renderização
+   dos cards e da tabela diária, relatórios Excel/PDF, histórico
+   de atualizações e gerenciamento de usuários.
+
+   Organização do arquivo (na ordem):
+   1. Config da API e estado global
+   2. Busca e tratamento de dados (fetch, filtros, agregação)
+   3. Renderização (cards e tabela por dia)
+   4. Navegação, filtros e modos de data
+   5. Relatórios (Excel e PDF)
+   6. Sessão, login, perfil e avatar
+   7. Gerenciamento de usuários (só Chefe/Adm)
+   8. Histórico, heartbeat e inicialização
+   ============================================================ */
+
 /* ===== CONFIG DA API (Google Apps Script) =====
    Depois de implantar o Apps Script (ver apps-script-Code.gs),
    cole aqui a URL que termina em /exec                          */
@@ -884,8 +903,20 @@ updateGreeting();
 setInterval(updateGreeting, 1000);
 
 /* ===== SIDEBAR TOGGLE ===== */
-document.getElementById('sidebarToggle').addEventListener('click', () => {
-  document.body.classList.toggle('sidebar-collapsed');
+const ehMobile = () => window.innerWidth <= 768;
+
+document.getElementById('sidebarToggle').addEventListener('click', e => {
+  e.stopPropagation();
+  document.body.classList.toggle(ehMobile() ? 'sidebar-aberta' : 'sidebar-collapsed');
+});
+
+// No mobile: fecha o menu ao navegar ou tocar fora dele
+document.addEventListener('click', e => {
+  if (!ehMobile() || !document.body.classList.contains('sidebar-aberta')) return;
+  const sidebar = document.getElementById('sidebar');
+  if (!sidebar.contains(e.target) || e.target.closest('.nav-item')) {
+    document.body.classList.remove('sidebar-aberta');
+  }
 });
 
 /* ===== REFRESH BUTTONS ===== */

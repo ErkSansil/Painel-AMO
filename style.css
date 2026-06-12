@@ -1,3 +1,17 @@
+/* ============================================================
+   PAINEL AMO — style.css
+   ------------------------------------------------------------
+   Todo o visual do painel. Os temas claro e escuro são feitos
+   com variáveis CSS (:root e body.dark) — pra mudar uma cor do
+   painel inteiro, altere a variável, não os componentes.
+
+   As transições seguem a curva cubic-bezier(.32,.72,.24,1),
+   a mesma "sensação iOS" usada em todo o projeto.
+
+   No fim do arquivo fica o bloco @media (max-width: 768px)
+   com todas as adaptações pra celular.
+   ============================================================ */
+
 /* ===== RESET & BASE ===== */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -1001,6 +1015,68 @@ body.dark .canal-badge.filial { color: #4ade80; }
 
 /* ===== DIVIDER ===== */
 .filter-row + .filter-row { }
+
+/* ===== RESPONSIVO (mobile) ===== */
+@media (max-width: 768px) {
+  /* Sidebar vira menu deslizante por cima do conteúdo */
+  .sidebar {
+    transform: translateX(-100%);
+    box-shadow: 8px 0 32px rgba(0,0,0,.2);
+    width: 240px;
+  }
+  body.sidebar-aberta .sidebar { transform: translateX(0); }
+  body.sidebar-collapsed .sidebar { transform: translateX(-100%); }
+  .main { margin-left: 0 !important; }
+
+  /* Fundo escurecido quando o menu está aberto */
+  body.sidebar-aberta::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.4);
+    z-index: 99;
+  }
+
+  /* Topbar compacta */
+  .topbar { padding: 0 12px; gap: 8px; }
+  .topbar-title { font-size: 13px; }
+  #greetingDateTime, .greeting-sep { display: none; }
+  .topbar-greeting { margin-right: 2px; }
+  .btn-refresh span-text { display: none; }
+
+  .content { padding: 16px 12px 32px; }
+  .page-header h1 { font-size: 22px; }
+
+  /* Filtros empilham */
+  .filter-row { flex-wrap: wrap; gap: 8px; }
+  .filter-label { min-width: 100%; }
+  .btn-group { flex-wrap: wrap; }
+  .btn-seg { padding: 6px 12px; font-size: 12.5px; }
+  .intervalo-inputs { flex-wrap: wrap; }
+
+  /* Status bar empilha */
+  .status-bar { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .status-left { flex-wrap: wrap; row-gap: 4px; }
+
+  /* Cards em coluna única */
+  .cards-row { grid-template-columns: 1fr; }
+  .card-metrics { grid-template-columns: 1fr 1fr; gap: 14px 20px; }
+  .metric-value { font-size: 22px; }
+
+  /* Tabela rola na horizontal (já tem .table-wrap) */
+  .table-toolbar { flex-wrap: wrap; gap: 8px; }
+
+  /* Histórico ocupa a largura da tela */
+  .historico-panel { width: calc(100vw - 24px); right: -52px; }
+
+  /* Perfil */
+  .config-card { padding: 20px 16px; }
+  .usuario-row { flex-wrap: wrap; }
+  .usuario-acoes { width: 100%; justify-content: flex-end; }
+
+  /* Login */
+  .login-card { padding: 32px 22px 28px; }
+}
 
 /* ===== SCROLLBAR ===== */
 ::-webkit-scrollbar { width: 6px; }
