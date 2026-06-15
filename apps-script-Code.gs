@@ -17,13 +17,86 @@
  *   ?action=login&usuario=&senha=          → valida login, marca Online
  *   ?action=ping&usuario=                  → heartbeat (mantém Online)
  *   ?action=logout&usuario=                → marca Offline
- *   ?action=criarlogin&admUsuario=&admSenha=&novoUsuario=&novaSenha=&nivel=
+ *   ?action=criarlogin&...&paineis=eder=Administrador;breno=Agente&dev=
+ *   ?action=editarusuario&...&paineis=&dev=
+ *   ?action=excluirusuario&...&usuario=
+ *   ?action=listarusuarios / situacao
+ *
+ * PERMISSÕES (multi-painel):
+ *   - Coluna PAINEIS guarda "eder=Administrador;breno=Agente" (nível por painel)
+ *   - Nível DEV (coluna NÍVEL = "DEV"): acesso total a todos os painéis
+ *   - Retrocompat: usuário com NÍVEL preenchido e sem PAINEIS é tratado
+ *     como aquele nível no Painel Éder
  */
 
 const ABA_SEDE = 'EDER SEDE';
 const ABA_FILIAL = 'EDER FILIAL';
+const ABA_BRENO_SEDE = 'BRENO SEDE';
+const ABA_BRENO_FILIAL = 'BRENO FILIAL';
 const ABA_CREDENCIAIS = 'CREDENCIAIS PAINEL';
 const MINUTOS_PARA_OFFLINE = 2;
+
+// Painéis e níveis reconhecidos pelo sistema
+const PAINEIS_VALIDOS = ['eder', 'breno'];
+const NIVEIS_VALIDOS = ['Chefe', 'Administrador', 'Consultor', 'Agente'];
+
+/** "eder=Administrador;breno=Agente" → { eder:'Administrador', breno:'Agente' } */
+function parsePaineis(texto) {
+  const obj = {};
+  String(texto || '').split(/[;,]/).forEach(par => {
+    const pedacos = par.split('=');
+    const painel = PAINEIS_VALIDOS.find(p => normHeader(p) === normHeader(pedacos[0]));
+    const nivel = NIVEIS_VALIDOS.find(n => normHeader(n) === normHeader(pedacos[1]));
+    if (painel && nivel) obj[painel] = nivel;
+  });
+  return obj;
+}
+
+/** { eder:'Administrador' } → "eder=Administrador" */
+function serializaPaineis(obj) {
+  return Object.keys(obj).map(p => p + '=' + obj[p]).join(';');
+}
+
+/** Descobre o acesso de um usuário (ehDev + mapa painel→nível) a partir da linha */
+function resolverAcesso(sh, idx, linha) {
+  const nivelCol = idx.nivel ? String(sh.getRange(linha, idx.nivel).getValue()).trim() : '';
+  const ehDev = normHeader(nivelCol) === 'dev';
+
+  if (ehDev) {
+    const paineis = {};
+    PAINEIS_VALIDOS.forEach(p => paineis[p] = 'DEV'); // acesso total
+    return { ehDev: true, paineis: paineis };
+  }
+
+  let paineis = idx.paineis
+    ? parsePaineis(sh.getRange(linha, idx.paineis).getValue())
+    : {};
+
+  // Retrocompat: sem coluna PAINEIS, mas com NÍVEL antigo → vale no Painel Éder
+  if (Object.keys(paineis).length === 0) {
+    const nivelAntigo = NIVEIS_VALIDOS.find(n => normHeader(n) === normHeader(nivelCol));
+    if (nivelAntigo) paineis = { eder: nivelAntigo };
+  }
+
+  // Chefe em qualquer painel = acesso total ilimitado a TODOS os painéis
+  const temChefe = Object.keys(paineis).some(p => normHeader(paineis[p]).includes('chefe'));
+  if (temChefe) {
+    const todos = {};
+    PAINEIS_VALIDOS.forEach(p => todos[p] = 'Chefe');
+    return { ehDev: false, paineis: todos };
+  }
+
+  return { ehDev: false, paineis: paineis };
+}
+
+/** Gestor = DEV, ou Chefe/Administrador em pelo menos um painel */
+function ehGestor(acesso) {
+  if (acesso.ehDev) return true;
+  return Object.keys(acesso.paineis).some(p => {
+    const n = normHeader(acesso.paineis[p]);
+    return n.includes('chefe') || n.includes('adm');
+  });
+}
 
 function doGet(e) {
   const action = (e.parameter.action || 'dados').toLowerCase();
@@ -43,14 +116,20 @@ function doGet(e) {
     } else if (action === 'criarlogin') {
       result = criarLogin(
         e.parameter.admUsuario, e.parameter.admSenha,
-        e.parameter.novoUsuario, e.parameter.novaSenha, e.parameter.nivel
+        e.parameter.novoUsuario, e.parameter.novaSenha,
+        e.parameter.paineis, e.parameter.dev
       );
     } else if (action === 'listarusuarios') {
       result = listarUsuarios(e.parameter.admUsuario, e.parameter.admSenha);
     } else if (action === 'editarusuario') {
       result = editarUsuario(
         e.parameter.admUsuario, e.parameter.admSenha,
-        e.parameter.usuario, e.parameter.novaSenha, e.parameter.novoNivel
+        e.parameter.usuario, e.parameter.novaSenha,
+        e.parameter.paineis, e.parameter.dev
+      );
+    } else if (action === 'excluirusuario') {
+      result = excluirUsuario(
+        e.parameter.admUsuario, e.parameter.admSenha, e.parameter.usuario
       );
     } else if (action === 'situacao') {
       result = mudarSituacao(
@@ -147,14 +226,23 @@ function lerDiario(nomeAba) {
 function getDados() {
   const sede = lerDiario(ABA_SEDE);
   const filial = lerDiario(ABA_FILIAL);
-  const alteracoes = detectarAlteracoes(sede, filial);
+  const alteracoes = detectarAlteracoes('eder', sede, filial);
+
+  let brenoSede = [], brenoFilial = [];
+  try { brenoSede = lerDiario(ABA_BRENO_SEDE); } catch(e) {}
+  try { brenoFilial = lerDiario(ABA_BRENO_FILIAL); } catch(e) {}
+  const alteracoesBreno = detectarAlteracoes('breno', brenoSede, brenoFilial);
 
   return {
     ok: true,
     sede: sede,
     filial: filial,
+    brenoSede: brenoSede,
+    brenoFilial: brenoFilial,
     ultimaAttLeads: alteracoes.leads,
     ultimaAttInvestimento: alteracoes.investimento,
+    brenoAttLeads: alteracoesBreno.leads,
+    brenoAttInvestimento: alteracoesBreno.investimento,
     geradoEm: new Date().toISOString(),
   };
 }
@@ -162,7 +250,7 @@ function getDados() {
 /** Detecta quando os dados de leads e de investimento mudaram pela última vez.
  *  Guarda um hash de cada grupo em PropertiesService; quando o hash muda,
  *  registra o horário. */
-function detectarAlteracoes(sede, filial) {
+function detectarAlteracoes(prefixo, sede, filial) {
   const props = PropertiesService.getScriptProperties();
   const todas = sede.concat(filial);
 
@@ -177,17 +265,17 @@ function detectarAlteracoes(sede, filial) {
   const agora = agoraTexto();
   const resultado = {};
 
-  if (props.getProperty('hashLeads') !== String(hashLeads)) {
-    props.setProperty('hashLeads', String(hashLeads));
-    props.setProperty('attLeads', agora);
+  if (props.getProperty(prefixo + '_hashLeads') !== String(hashLeads)) {
+    props.setProperty(prefixo + '_hashLeads', String(hashLeads));
+    props.setProperty(prefixo + '_attLeads', agora);
   }
-  if (props.getProperty('hashInvest') !== String(hashInvest)) {
-    props.setProperty('hashInvest', String(hashInvest));
-    props.setProperty('attInvest', agora);
+  if (props.getProperty(prefixo + '_hashInvest') !== String(hashInvest)) {
+    props.setProperty(prefixo + '_hashInvest', String(hashInvest));
+    props.setProperty(prefixo + '_attInvest', agora);
   }
 
-  resultado.leads = props.getProperty('attLeads') || agora;
-  resultado.investimento = props.getProperty('attInvest') || agora;
+  resultado.leads = props.getProperty(prefixo + '_attLeads') || agora;
+  resultado.investimento = props.getProperty(prefixo + '_attInvest') || agora;
   return resultado;
 }
 
@@ -213,26 +301,40 @@ function colunasCred(sh) {
     else if (n.includes('ultimo') || n.includes('acesso')) idx.ultimoAcesso = i + 1;
     else if (n.includes('status')) idx.status = i + 1;
     else if (n.includes('situacao') || n.includes('suspens')) idx.situacao = i + 1;
+    else if (n.includes('paineis') || n.includes('painel')) idx.paineis = i + 1;
   });
 
-  // Cria a coluna SITUAÇÃO automaticamente se não existir
+  // Cria colunas que faltarem automaticamente
   if (!idx.situacao) {
     const novaCol = sh.getLastColumn() + 1;
     sh.getRange(1, novaCol).setValue('SITUAÇÃO');
     idx.situacao = novaCol;
   }
+  if (!idx.paineis) {
+    const novaCol = sh.getLastColumn() + 1;
+    sh.getRange(1, novaCol).setValue('PAINEIS');
+    idx.paineis = novaCol;
+  }
   return idx;
 }
 
-/** Valida que quem chama é Chefe ou Administrador */
+/** Valida que quem chama pode gerenciar usuários (DEV, ou Chefe/Adm em algum painel).
+ *  Usa autenticação "silenciosa" (não marca Online) para não poluir o status. */
 function autenticarGestor(admUsuario, admSenha) {
-  const auth = login(admUsuario, admSenha);
-  if (!auth.ok) return { ok: false, erro: 'Credenciais inválidas' };
-  const n = normHeader(auth.nivel);
-  if (!n.includes('chefe') && !n.includes('adm')) {
+  if (!admUsuario || !admSenha) return { ok: false, erro: 'Credenciais inválidas' };
+  const sh = abaCred();
+  const idx = colunasCred(sh);
+  const linha = linhaDoUsuario(sh, idx, admUsuario);
+  if (!linha) return { ok: false, erro: 'Credenciais inválidas' };
+
+  const senhaPlanilha = String(sh.getRange(linha, idx.senha).getValue()).trim();
+  if (senhaPlanilha !== String(admSenha).trim()) return { ok: false, erro: 'Credenciais inválidas' };
+
+  const acesso = resolverAcesso(sh, idx, linha);
+  if (!ehGestor(acesso)) {
     return { ok: false, erro: 'Seu nível de acesso não permite gerenciar usuários' };
   }
-  return auth;
+  return { ok: true, ehDev: acesso.ehDev, paineis: acesso.paineis };
 }
 
 /** Encontra a linha (número) de um usuário; 0 se não achar */
@@ -320,10 +422,12 @@ function login(usuario, senha) {
   if (idx.status) sh.getRange(linha, idx.status).setValue('Online');
   atualizarStatusOffline(sh, idx);
 
+  const acesso = resolverAcesso(sh, idx, linha);
   return {
     ok: true,
     usuario: String(sh.getRange(linha, idx.usuario).getValue()).trim(),
-    nivel: idx.nivel ? String(sh.getRange(linha, idx.nivel).getValue()).trim() : 'Administrador',
+    ehDev: acesso.ehDev,
+    paineis: acesso.paineis,
   };
 }
 
@@ -350,28 +454,30 @@ function logout(usuario) {
   return { ok: true };
 }
 
-function criarLogin(admUsuario, admSenha, novoUsuario, novaSenha, nivel) {
-  const auth = login(admUsuario, admSenha);
-  if (!auth.ok) return { ok: false, erro: 'Credenciais inválidas' };
-  // Apenas Chefe e Administrador podem criar logins
-  const nivelAuth = normHeader(auth.nivel);
-  if (!nivelAuth.includes('chefe') && !nivelAuth.includes('adm')) {
-    return { ok: false, erro: 'Seu nível de acesso não permite criar logins' };
-  }
+function criarLogin(admUsuario, admSenha, novoUsuario, novaSenha, paineisStr, dev) {
+  const auth = autenticarGestor(admUsuario, admSenha);
+  if (!auth.ok) return auth;
   if (!novoUsuario || !novaSenha) return { ok: false, erro: 'Informe o novo usuário e senha' };
+
+  const querDev = String(dev) === '1' || normHeader(dev) === 'true';
+  if (querDev && !auth.ehDev) {
+    return { ok: false, erro: 'Apenas DEV pode criar outro DEV' };
+  }
+
+  const paineis = parsePaineis(paineisStr);
+  if (!querDev && Object.keys(paineis).length === 0) {
+    return { ok: false, erro: 'Selecione ao menos um painel para o usuário' };
+  }
 
   const sh = abaCred();
   const idx = colunasCred(sh);
   if (linhaDoUsuario(sh, idx, novoUsuario)) return { ok: false, erro: 'Usuário já existe' };
 
   const novaLinha = sh.getLastRow() + 1;
-  if (idx.usuario) sh.getRange(novaLinha, idx.usuario).setValue(String(novoUsuario).trim());
-  if (idx.senha) sh.getRange(novaLinha, idx.senha).setValue(String(novaSenha).trim());
-  // Níveis válidos: Chefe, Administrador, Consultor, Agente
-  const niveisValidos = ['Chefe', 'Administrador', 'Consultor', 'Agente'];
-  const nivelFinal = niveisValidos.find(n =>
-    normHeader(n) === normHeader(nivel || '')) || 'Administrador';
-  if (idx.nivel) sh.getRange(novaLinha, idx.nivel).setValue(nivelFinal);
+  sh.getRange(novaLinha, idx.usuario).setValue(String(novoUsuario).trim());
+  sh.getRange(novaLinha, idx.senha).setValue(String(novaSenha).trim());
+  if (idx.nivel) sh.getRange(novaLinha, idx.nivel).setValue(querDev ? 'DEV' : 'Padrão');
+  if (idx.paineis) sh.getRange(novaLinha, idx.paineis).setValue(querDev ? '' : serializaPaineis(paineis));
   if (idx.criado) sh.getRange(novaLinha, idx.criado).setValue(agoraTexto());
   if (idx.status) sh.getRange(novaLinha, idx.status).setValue('Offline');
 
@@ -390,25 +496,31 @@ function listarUsuarios(admUsuario, admSenha) {
   const lastRow = sh.getLastRow();
   if (lastRow < 2) return { ok: true, usuarios: [] };
 
-  const dados = sh.getRange(2, 1, lastRow - 1, sh.getLastColumn()).getValues();
   const get = (row, col) => col ? String(row[col - 1] || '').trim() : '';
+  const usuarios = [];
 
-  const usuarios = dados
-    .filter(row => get(row, idx.usuario))
-    .map(row => ({
+  for (let linha = 2; linha <= lastRow; linha++) {
+    const row = sh.getRange(linha, 1, 1, sh.getLastColumn()).getValues()[0];
+    if (!get(row, idx.usuario)) continue;
+
+    const acesso = resolverAcesso(sh, idx, linha);
+    usuarios.push({
       usuario: get(row, idx.usuario),
-      nivel: get(row, idx.nivel) || 'Administrador',
+      ehDev: acesso.ehDev,
+      paineis: acesso.paineis,
       criado: get(row, idx.criado),
-      ultimoAcesso: get(row, idx.ultimoAcesso),
+      // DEV não expõe a hora de acesso — só o status
+      ultimoAcesso: acesso.ehDev ? '' : get(row, idx.ultimoAcesso),
       status: get(row, idx.status) || 'Offline',
       situacao: normHeader(get(row, idx.situacao)).includes('suspens') ? 'Suspenso' : 'Ativo',
-    }));
+    });
+  }
 
-  return { ok: true, usuarios: usuarios };
+  return { ok: true, usuarios: usuarios, solicitanteEhDev: auth.ehDev };
 }
 
-/** Edita senha e/ou nível de um usuário */
-function editarUsuario(admUsuario, admSenha, usuario, novaSenha, novoNivel) {
+/** Edita senha e/ou painéis (níveis) e/ou flag DEV de um usuário */
+function editarUsuario(admUsuario, admSenha, usuario, novaSenha, paineisStr, dev) {
   const auth = autenticarGestor(admUsuario, admSenha);
   if (!auth.ok) return auth;
 
@@ -417,15 +529,52 @@ function editarUsuario(admUsuario, admSenha, usuario, novaSenha, novoNivel) {
   const linha = linhaDoUsuario(sh, idx, usuario);
   if (!linha) return { ok: false, erro: 'Usuário não encontrado' };
 
+  // Mexer em conta DEV (ou tornar alguém DEV) exige ser DEV
+  const alvo = resolverAcesso(sh, idx, linha);
+  const querDev = String(dev) === '1' || normHeader(dev) === 'true';
+  if ((alvo.ehDev || querDev) && !auth.ehDev) {
+    return { ok: false, erro: 'Apenas DEV pode alterar uma conta DEV' };
+  }
+
   if (novaSenha && idx.senha) {
     sh.getRange(linha, idx.senha).setValue(String(novaSenha).trim());
   }
-  if (novoNivel && idx.nivel) {
-    const niveisValidos = ['Chefe', 'Administrador', 'Consultor', 'Agente'];
-    const nivelFinal = niveisValidos.find(n => normHeader(n) === normHeader(novoNivel));
-    if (nivelFinal) sh.getRange(linha, idx.nivel).setValue(nivelFinal);
+
+  // paineis só é atualizado se veio no pedido (string não-undefined)
+  if (paineisStr !== undefined && paineisStr !== null) {
+    const paineis = parsePaineis(paineisStr);
+    if (!querDev && Object.keys(paineis).length === 0) {
+      return { ok: false, erro: 'O usuário precisa de ao menos um painel' };
+    }
+    if (idx.nivel) sh.getRange(linha, idx.nivel).setValue(querDev ? 'DEV' : 'Padrão');
+    if (idx.paineis) sh.getRange(linha, idx.paineis).setValue(querDev ? '' : serializaPaineis(paineis));
   }
+
   return { ok: true, mensagem: 'Usuário atualizado com sucesso' };
+}
+
+/** Exclui um usuário (apaga a linha). Não pode excluir a si mesmo. */
+function excluirUsuario(admUsuario, admSenha, usuario) {
+  const auth = autenticarGestor(admUsuario, admSenha);
+  if (!auth.ok) return auth;
+
+  if (String(usuario).trim().toLowerCase() === String(admUsuario).trim().toLowerCase()) {
+    return { ok: false, erro: 'Você não pode excluir a si mesmo' };
+  }
+
+  const sh = abaCred();
+  const idx = colunasCred(sh);
+  const linha = linhaDoUsuario(sh, idx, usuario);
+  if (!linha) return { ok: false, erro: 'Usuário não encontrado' };
+
+  // Só DEV pode excluir uma conta DEV
+  const alvo = resolverAcesso(sh, idx, linha);
+  if (alvo.ehDev && !auth.ehDev) {
+    return { ok: false, erro: 'Apenas DEV pode excluir uma conta DEV' };
+  }
+
+  sh.deleteRow(linha);
+  return { ok: true, mensagem: 'Usuário excluído' };
 }
 
 /** Ativa ou suspende um usuário */
@@ -442,6 +591,12 @@ function mudarSituacao(admUsuario, admSenha, usuario, situacao) {
   const idx = colunasCred(sh);
   const linha = linhaDoUsuario(sh, idx, usuario);
   if (!linha) return { ok: false, erro: 'Usuário não encontrado' };
+
+  // Só DEV pode suspender/reativar uma conta DEV
+  const alvo = resolverAcesso(sh, idx, linha);
+  if (alvo.ehDev && !auth.ehDev) {
+    return { ok: false, erro: 'Apenas DEV pode alterar uma conta DEV' };
+  }
 
   const nova = normHeader(situacao).includes('suspens') ? 'Suspenso' : 'Ativo';
   sh.getRange(linha, idx.situacao).setValue(nova);

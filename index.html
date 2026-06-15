@@ -1,12 +1,4 @@
 <!DOCTYPE html>
-<!-- ============================================================
-  PAINEL AMO — index.html
-  Estrutura da página: tela de login (overlay), sidebar de
-  navegação, topbar e as 4 páginas (Visão Geral, Visualização
-  por Dia, Importar Relatório e Perfil). A troca de páginas é
-  feita via JS alternando a classe .active — é uma SPA simples,
-  sem framework. Veja o README.md para a documentação completa.
-============================================================= -->
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
@@ -77,29 +69,66 @@
     </div>
 
     <nav class="nav">
-      <p class="nav-label">Navegação</p>
-      <a href="#" class="nav-item active" data-page="visao-geral">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-        Visão Geral
-      </a>
-      <a href="#" class="nav-item" data-page="por-dia">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-        Visualização por Dia
-      </a>
-      <a href="#" class="nav-item" data-page="importar">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        Importar Relatório
-      </a>
+      <p class="nav-label">Painéis</p>
+
+      <!-- GRUPO: Painel de Performance - Éder -->
+      <div class="nav-group aberto" data-group="eder">
+        <button class="nav-group-header" data-page="visao-geral">
+          <svg class="nav-group-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><rect x="7" y="10" width="3" height="8"/><rect x="12" y="6" width="3" height="12"/><rect x="17" y="13" width="3" height="5"/></svg>
+          <span class="nav-group-titulo">Painel Éder</span>
+          <svg class="nav-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="nav-group-items">
+          <a href="#" class="nav-item active" data-page="visao-geral">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+            Visão Geral Éder
+          </a>
+          <a href="#" class="nav-item" data-page="por-dia">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            Visualização por Dia
+          </a>
+          <a href="#" class="nav-item" data-page="importar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Importar Relatório
+          </a>
+        </div>
+      </div>
+
+      <!-- GRUPO: Painel Breno -->
+      <div class="nav-group aberto" data-group="breno">
+        <button class="nav-group-header" data-page="breno-visao-geral">
+          <svg class="nav-group-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><rect x="7" y="10" width="3" height="8"/><rect x="12" y="6" width="3" height="12"/><rect x="17" y="13" width="3" height="5"/></svg>
+          <span class="nav-group-titulo">Painel Breno</span>
+          <svg class="nav-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="nav-group-items">
+          <a href="#" class="nav-item" data-page="breno-visao-geral">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+            Visão Geral Breno
+          </a>
+          <a href="#" class="nav-item" data-page="breno-por-dia">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            Visualização por Dia
+          </a>
+          <a href="#" class="nav-item" data-page="breno-importar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Importar Relatório
+          </a>
+        </div>
+      </div>
+    </nav>
+
+    <!-- RODAPÉ DA SIDEBAR -->
+    <div class="sidebar-footer">
       <a href="#" class="nav-item" data-page="perfil">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
         Perfil
       </a>
-    </nav>
-
-    <button class="dark-toggle" id="darkToggle">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="darkIcon"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-      <span id="darkLabel">Modo escuro</span>
-    </button>
+      <button class="dark-toggle" id="darkToggle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="darkIcon"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <span id="darkLabel">Modo escuro</span>
+      </button>
+    </div>
   </aside>
 
   <!-- MAIN -->
@@ -111,12 +140,14 @@
         <button class="btn-icon" id="sidebarToggle" title="Recolher menu">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
         </button>
-        Painel de performance - Eder
+        Painel Gerencial
       </div>
       <div class="topbar-actions">
         <div class="topbar-greeting">
-          <span class="topbar-avatar" id="topbarAvatar">?</span>
-          <span id="greetingName">Olá, Eder</span>
+          <button class="topbar-perfil" id="abrirPerfil" title="Abrir perfil">
+            <span class="topbar-avatar" id="topbarAvatar">?</span>
+            <span id="greetingName">Olá, Eder</span>
+          </button>
           <span class="greeting-sep">•</span>
           <span id="greetingDateTime"></span>
         </div>
@@ -145,8 +176,8 @@
       <section id="page-visao-geral" class="page active">
 
         <div class="page-header">
-          <h1>Visão geral</h1>
-          <p>Performance consolidada — AMO Sede e AMO Filial.</p>
+          <h1>Visão geral — Éder</h1>
+          <p>Performance consolidada — Éder Sede e Éder Filial.</p>
         </div>
 
         <!-- FILTROS -->
@@ -202,8 +233,8 @@
             </span>
             <div class="btn-group" id="canalGroup">
               <button class="btn-seg active" data-val="todos">Todos</button>
-              <button class="btn-seg" data-val="sede">AMO Sede</button>
-              <button class="btn-seg" data-val="filial">AMO Filial</button>
+              <button class="btn-seg" data-val="sede">Éder Sede</button>
+              <button class="btn-seg" data-val="filial">Éder Filial</button>
             </div>
           </div>
         </div>
@@ -312,8 +343,8 @@
             <label class="config-label">Canal</label>
             <div class="btn-group" id="repCanalGroup" style="align-self:flex-start">
               <button class="btn-seg active" data-val="todos">Sede + Filial</button>
-              <button class="btn-seg" data-val="sede">AMO Sede</button>
-              <button class="btn-seg" data-val="filial">AMO Filial</button>
+              <button class="btn-seg" data-val="sede">Éder Sede</button>
+              <button class="btn-seg" data-val="filial">Éder Filial</button>
             </div>
           </div>
 
@@ -329,6 +360,177 @@
             Baixar relatório
           </button>
           <p class="config-saved hidden" id="repFeedback">Relatório gerado!</p>
+        </div>
+      </section>
+
+      <!-- PAGE: BRENO — VISÃO GERAL -->
+      <section id="page-breno-visao-geral" class="page">
+        <div class="page-header">
+          <h1>Visão geral — Breno</h1>
+          <p>Performance consolidada — Breno Sede e Breno Filial.</p>
+        </div>
+        <div class="filters-card">
+          <div class="filter-row">
+            <span class="filter-label">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              Período
+            </span>
+            <div class="btn-group" id="bPeriodGroup">
+              <button class="btn-seg active" data-val="hoje">Hoje</button>
+              <button class="btn-seg" data-val="ontem">Ontem</button>
+              <button class="btn-seg" data-val="7d">7d</button>
+              <button class="btn-seg" data-val="30d">30d</button>
+              <button class="btn-seg" data-val="60d">60d</button>
+              <button class="btn-seg" data-val="90d">90d</button>
+            </div>
+          </div>
+          <div class="filter-row">
+            <span class="filter-label">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              Data
+            </span>
+            <button class="btn-date" id="bBtnDataEspecifica">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              <span id="bLabelDataEspecifica">Selecionar data específica</span>
+            </button>
+            <input type="date" id="bInputDataEspecifica" style="position:absolute;opacity:0;width:0;height:0;border:0;padding:0" />
+          </div>
+          <div class="filter-row">
+            <span class="filter-label">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              Intervalo
+            </span>
+            <button class="btn-date" id="bBtnIntervalo">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              <span id="bLabelIntervalo">Selecionar intervalo de datas</span>
+            </button>
+            <div id="bIntervaloInputs" class="intervalo-inputs hidden">
+              <input type="date" id="bInputDe" />
+              <span>até</span>
+              <input type="date" id="bInputAte" />
+              <button class="btn-seg active" id="bBtnAplicarIntervalo">Aplicar</button>
+            </div>
+          </div>
+          <div class="filter-row">
+            <span class="filter-label">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+              Canal
+            </span>
+            <div class="btn-group" id="bCanalGroup">
+              <button class="btn-seg active" data-val="todos">Todos</button>
+              <button class="btn-seg" data-val="sede">Breno Sede</button>
+              <button class="btn-seg" data-val="filial">Breno Filial</button>
+            </div>
+          </div>
+        </div>
+        <div class="status-bar">
+          <div class="status-left">
+            <span class="status-dot"></span>
+            <span class="status-text">Atualizado</span>
+            <span class="status-info">Última: <strong id="bUltimaAtt">--:--:--</strong></span>
+            <span class="status-sep">•</span>
+            <span class="status-info">Próxima em: <strong id="bProximaAtt">--:--</strong></span>
+            <span class="status-sep">•</span>
+            <span class="status-info">Leads atualizados: <strong id="bAttLeads">--</strong></span>
+            <span class="status-sep">•</span>
+            <span class="status-info">Investimento atualizado: <strong id="bAttInvestimento">--</strong></span>
+          </div>
+          <button class="btn-refresh small" id="bRefreshBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            Atualizar agora
+          </button>
+        </div>
+        <div id="bCardsContainer"></div>
+      </section>
+
+      <!-- PAGE: BRENO — POR DIA -->
+      <section id="page-breno-por-dia" class="page">
+        <div class="page-header">
+          <h1>Visualização por Dia — Breno</h1>
+          <p>Detalhamento diário de performance.</p>
+        </div>
+        <div class="table-card">
+          <div class="table-toolbar">
+            <div class="table-toolbar-left">
+              <span class="toolbar-label">Linhas por página:</span>
+              <select id="bPageSizeSelect" class="page-size-select">
+                <option value="25">25</option>
+                <option value="50" selected>50</option>
+                <option value="100">100</option>
+                <option value="200">200</option>
+              </select>
+            </div>
+            <span class="table-count" id="bTableCount"></span>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Canal</th>
+                  <th>Investimento</th>
+                  <th>N° Leads</th>
+                  <th>N° Potenciais</th>
+                  <th>N° Potenciais Reais</th>
+                  <th>N° Leads Aptas</th>
+                </tr>
+              </thead>
+              <tbody id="bTableBody"></tbody>
+            </table>
+          </div>
+          <div class="table-pagination">
+            <button class="btn-page" id="bBtnPrevPage">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+              Anterior
+            </button>
+            <span class="page-info" id="bPageInfo"></span>
+            <button class="btn-page" id="bBtnNextPage">
+              Próxima
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- PAGE: BRENO — IMPORTAR RELATÓRIO -->
+      <section id="page-breno-importar" class="page">
+        <div class="page-header">
+          <h1>Importar Relatório — Breno</h1>
+          <p>Extraia os dados do Painel Breno em Excel ou PDF.</p>
+        </div>
+        <div class="config-card">
+          <div class="config-field">
+            <label class="config-label">Período do relatório</label>
+            <div class="intervalo-inputs" style="display:flex">
+              <input type="date" id="bRepDe" />
+              <span>até</span>
+              <input type="date" id="bRepAte" />
+            </div>
+          </div>
+          <div class="config-field">
+            <label class="config-label">Tipo de relatório</label>
+            <div class="btn-group" id="bRepTipoGroup" style="align-self:flex-start">
+              <button class="btn-seg active" data-val="consolidado">Resumo Consolidado</button>
+              <button class="btn-seg" data-val="diario">Detalhado por Dia</button>
+            </div>
+          </div>
+          <div class="config-field">
+            <label class="config-label">Canal</label>
+            <div class="btn-group" id="bRepCanalGroup" style="align-self:flex-start">
+              <button class="btn-seg active" data-val="todos">Sede + Filial</button>
+              <button class="btn-seg" data-val="sede">Breno Sede</button>
+              <button class="btn-seg" data-val="filial">Breno Filial</button>
+            </div>
+          </div>
+          <div class="config-field">
+            <label class="config-label">Formato do arquivo</label>
+            <div class="btn-group" id="bRepFormatoGroup" style="align-self:flex-start">
+              <button class="btn-seg active" data-val="excel">Excel (.xlsx)</button>
+              <button class="btn-seg" data-val="pdf">PDF</button>
+            </div>
+          </div>
+          <button class="btn-primary" id="bBtnBaixarRelatorio">Baixar relatório</button>
+          <p class="config-saved hidden" id="bRepFeedback">Relatório gerado!</p>
         </div>
       </section>
 
@@ -424,13 +626,12 @@
               <p class="config-saved hidden" id="senhaMismatch" style="color:#ef4444">As senhas não coincidem.</p>
             </div>
             <div class="config-field" style="margin-bottom:16px">
-              <label class="config-label">Nível de acesso</label>
-              <select class="config-input" id="novoNivel" style="max-width:240px">
-                <option value="Chefe">Chefe — acesso total</option>
-                <option value="Administrador" selected>Administrador — acesso total</option>
-                <option value="Consultor">Consultor — não cria logins</option>
-                <option value="Agente">Agente — não baixa relatórios</option>
-              </select>
+              <label class="config-label">Acesso aos painéis e nível em cada um</label>
+              <div class="paineis-acoes">
+                <button type="button" class="btn-mini" id="novoSelTudo">Selecionar tudo</button>
+                <button type="button" class="btn-mini" id="novoLimparTudo">Limpar tudo</button>
+              </div>
+              <div class="paineis-seletor" id="novoPaineis"></div>
             </div>
             <button class="btn-primary" id="btnCriarCredencial">Criar credencial</button>
             <p class="config-saved hidden" id="credFeedback"></p>
@@ -460,6 +661,53 @@
 
     </div>
   </main>
+
+  <!-- MODAL: editar usuário -->
+  <div class="modal-overlay hidden" id="modalUsuario">
+    <div class="modal-card">
+      <button class="modal-fechar" id="modalFechar" title="Fechar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+      <div class="perfil-header" style="margin-bottom:4px">
+        <div class="usuario-avatar" id="modalAvatar" style="width:46px;height:46px;font-size:18px">?</div>
+        <div>
+          <div class="card-title" id="modalNome">—</div>
+          <div class="card-subtitle" id="modalStatus">—</div>
+        </div>
+      </div>
+
+      <div class="modal-infos" id="modalInfos"></div>
+
+      <hr style="border:none;border-top:1px solid var(--border);margin:4px 0 16px" />
+
+      <div class="config-field" style="margin-bottom:16px">
+        <label class="config-label">Nova senha (vazio = manter)</label>
+        <div class="input-eye-wrap">
+          <input type="password" class="config-input" id="modalSenha" placeholder="••••••••" />
+          <button type="button" class="btn-eye" data-target="modalSenha" title="Mostrar/ocultar">
+            <svg class="eye-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            <svg class="eye-closed hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="config-field" style="margin-bottom:16px">
+        <label class="config-label">Acesso aos painéis e nível em cada um</label>
+        <div class="paineis-acoes">
+          <button type="button" class="btn-mini" id="modalSelTudo">Selecionar tudo</button>
+          <button type="button" class="btn-mini" id="modalLimparTudo">Limpar tudo</button>
+        </div>
+        <div class="paineis-seletor" id="modalPaineis"></div>
+      </div>
+
+      <p class="config-saved hidden" id="modalFeedback"></p>
+
+      <div class="modal-acoes">
+        <button class="btn-mini perigo" id="modalExcluir">Excluir usuário</button>
+        <button class="btn-primary" id="modalSalvar">Salvar alterações</button>
+      </div>
+    </div>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>

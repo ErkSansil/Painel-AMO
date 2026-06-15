@@ -30,6 +30,7 @@ const state = {
   dataEspecifica: null,
   intervalo: { de: null, ate: null },
   data: null,      // dados brutos do sheets
+  carregando: false,
   refreshTimer: null,
   countdown: 60,
   autoRefreshMin: 1,
@@ -69,6 +70,17 @@ function calcTotal(d) {
 /* ===== FETCH ===== */
 // Linhas diárias cruas vindas da planilha (uma por dia, por canal)
 let rawRows = { sede: [], filial: [] };
+let rawRowsBreno = { sede: [], filial: [] };
+
+const stateBreno = {
+  filtroModo: 'periodo',
+  periodo: 'hoje',
+  canal: 'todos',
+  dataEspecifica: null,
+  intervalo: { de: null, ate: null },
+  data: null,
+  carregando: false,
+};
 
 async function fetchData() {
   if (!SHEETS_API_URL) {
@@ -103,6 +115,12 @@ async function fetchData() {
       filial: agregarRows(filtrarPorData(rawRows.filial)),
     };
     atualizarTabelaDiaria();
+    rawRowsBreno = { sede: json.brenoSede || [], filial: json.brenoFilial || [] };
+    stateBreno.data = {
+      sede: agregarRows(filtrarPorDataBreno(rawRowsBreno.sede)),
+      filial: agregarRows(filtrarPorDataBreno(rawRowsBreno.filial)),
+    };
+    atualizarTabelaDiariaBreno();
 
     // Horários de última alteração detectados pela API
     if (json.ultimaAttLeads) {
@@ -118,6 +136,14 @@ async function fetchData() {
         addLog('invest', 'Investimento atualizado na planilha', json.ultimaAttInvestimento);
       }
       el.textContent = json.ultimaAttInvestimento;
+    }
+    if (json.brenoAttLeads) {
+      const el = document.getElementById('bAttLeads');
+      if (el) el.textContent = json.brenoAttLeads;
+    }
+    if (json.brenoAttInvestimento) {
+      const el = document.getElementById('bAttInvestimento');
+      if (el) el.textContent = json.brenoAttInvestimento;
     }
   } catch (e) {
     console.warn('Erro ao buscar Sheets, usando mock:', e);
@@ -139,6 +165,28 @@ function filtrarPorData(rows) {
   }
   // período
   const p = state.periodo || '30d';
+  if (p === 'hoje') return rows.filter(r => +dia(r.data) === +hoje);
+  if (p === 'ontem') {
+    const ontem = new Date(hoje); ontem.setDate(ontem.getDate() - 1);
+    return rows.filter(r => +dia(r.data) === +ontem);
+  }
+  const dias = parseInt(p) || 30;
+  const inicio = new Date(hoje); inicio.setDate(inicio.getDate() - (dias - 1));
+  return rows.filter(r => { const d = dia(r.data); return d >= inicio && d <= hoje; });
+}
+
+function filtrarPorDataBreno(rows) {
+  const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+  const dia = d => { const x = new Date(d + 'T00:00:00'); x.setHours(0, 0, 0, 0); return x; };
+
+  if (stateBreno.filtroModo === 'data' && stateBreno.dataEspecifica) {
+    return rows.filter(r => r.data === stateBreno.dataEspecifica);
+  }
+  if (stateBreno.filtroModo === 'intervalo' && stateBreno.intervalo.de && stateBreno.intervalo.ate) {
+    const de = dia(stateBreno.intervalo.de), ate = dia(stateBreno.intervalo.ate);
+    return rows.filter(r => { const d = dia(r.data); return d >= de && d <= ate; });
+  }
+  const p = stateBreno.periodo || '30d';
   if (p === 'hoje') return rows.filter(r => +dia(r.data) === +hoje);
   if (p === 'ontem') {
     const ontem = new Date(hoje); ontem.setDate(ontem.getDate() - 1);
@@ -180,6 +228,25 @@ function atualizarTabelaDiaria() {
   renderTable();
 }
 
+function atualizarTabelaDiariaBreno() {
+  const rows = [
+    ...rawRowsBreno.sede.map(r => ({ ...r, canal: 'sede' })),
+    ...rawRowsBreno.filial.map(r => ({ ...r, canal: 'filial' })),
+  ];
+  rows.sort((a, b) => b.data.localeCompare(a.data));
+  tableStateBreno.rows = rows.map(r => ({
+    data: r.data,
+    canal: r.canal,
+    investimento: r.investimento || 0,
+    leads: r.leads || 0,
+    potenciais: r.potenciaisCLT || 0,
+    potenciaisReais: r.potenciaisReais || 0,
+    leadsAptas: r.leadsAptas || 0,
+  }));
+  tableStateBreno.page = 1;
+  renderTableBreno();
+}
+
 /* ===== FORMAT ===== */
 function fmtBRL(v) {
   return 'R$ ' + Math.round(v).toLocaleString('pt-BR');
@@ -191,8 +258,38 @@ function fmtNum(v) {
 /* ===== RENDER CARDS ===== */
 function renderCards() {
   const container = document.getElementById('cardsContainer');
-  if (!state.data) {
-    container.innerHTML = '<p style="color:var(--text-muted);font-size:14px">Carregando...</p>';
+  if (!state.data || state.carregando) {
+    // Monta os cards com o esqueleto animado enquanto carrega
+    const skVal = '<span class="metric-value loading">––––</span>';
+    const skCard = (title, subtitle, wide) => `
+      <div class="metric-card${wide ? ' card-total' : ''}" style="margin-bottom:16px">
+        <div class="card-header">
+          <div class="card-icon ${wide ? 'total' : ''}"></div>
+          <div>
+            <div class="card-title">${title}</div>
+            ${subtitle ? `<div class="card-subtitle">${subtitle}</div>` : ''}
+          </div>
+        </div>
+        <div class="card-metrics">
+          ${['Investimento','N° Leads','N° Potenciais','N° Potenciais Reais','N° Leads Aptas']
+            .map(l => `<div class="metric-item"><div class="metric-label">${l}</div>${skVal}</div>`)
+            .join('')}
+        </div>
+      </div>`;
+
+    const showTotal  = state.canal === 'todos';
+    const showSede   = state.canal === 'todos' || state.canal === 'sede';
+    const showFilial = state.canal === 'todos' || state.canal === 'filial';
+
+    let html = '';
+    if (showTotal)  html += skCard('Total Geral', 'Éder Sede + Éder Filial', true);
+    if (showSede || showFilial) {
+      html += '<div class="cards-row">';
+      if (showSede)   html += skCard('Éder Sede', '', false);
+      if (showFilial) html += skCard('Éder Filial', '', false);
+      html += '</div>';
+    }
+    container.innerHTML = html;
     return;
   }
 
@@ -211,7 +308,7 @@ function renderCards() {
       type: 'total',
       icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>',
       title: 'Total Geral',
-      subtitle: 'AMO Sede + AMO Filial',
+      subtitle: 'Éder Sede + Éder Filial',
       metrics: [
         { label: 'Investimento', value: fmtBRL(total.investimento) },
         { label: 'N° Leads', value: fmtNum(total.leads) },
@@ -229,7 +326,7 @@ function renderCards() {
       html += cardHTML({
         type: 'sede',
         icon: 'S',
-        title: 'AMO Sede',
+        title: 'Éder Sede',
         subtitle: '',
         metrics: [
           { label: 'Investimento', value: fmtBRL(d.sede.investimento) },
@@ -244,7 +341,7 @@ function renderCards() {
       html += cardHTML({
         type: 'filial',
         icon: 'F',
-        title: 'AMO Filial',
+        title: 'Éder Filial',
         subtitle: '',
         metrics: [
           { label: 'Investimento', value: fmtBRL(d.filial.investimento) },
@@ -283,11 +380,109 @@ function cardHTML({ type, icon, title, subtitle, metrics, wide }) {
   `;
 }
 
+function renderCardsBreno() {
+  const container = document.getElementById('bCardsContainer');
+  if (!container) return;
+  if (!stateBreno.data || stateBreno.carregando) {
+    const skVal = '<span class="metric-value loading">––––</span>';
+    const skCard = (title, subtitle, wide) => `
+      <div class="metric-card${wide ? ' card-total' : ''}" style="margin-bottom:16px">
+        <div class="card-header">
+          <div class="card-icon ${wide ? 'total' : ''}"></div>
+          <div>
+            <div class="card-title">${title}</div>
+            ${subtitle ? `<div class="card-subtitle">${subtitle}</div>` : ''}
+          </div>
+        </div>
+        <div class="card-metrics">
+          ${['Investimento','N° Leads','N° Potenciais','N° Potenciais Reais','N° Leads Aptas']
+            .map(l => `<div class="metric-item"><div class="metric-label">${l}</div>${skVal}</div>`)
+            .join('')}
+        </div>
+      </div>`;
+    const showTotal  = stateBreno.canal === 'todos';
+    const showSede   = stateBreno.canal === 'todos' || stateBreno.canal === 'sede';
+    const showFilial = stateBreno.canal === 'todos' || stateBreno.canal === 'filial';
+    let html = '';
+    if (showTotal)  html += skCard('Total Geral', 'Breno Sede + Breno Filial', true);
+    if (showSede || showFilial) {
+      html += '<div class="cards-row">';
+      if (showSede)   html += skCard('Breno Sede', '', false);
+      if (showFilial) html += skCard('Breno Filial', '', false);
+      html += '</div>';
+    }
+    container.innerHTML = html;
+    return;
+  }
+
+  const d = stateBreno.data;
+  const total = calcTotal(d);
+  const canal = stateBreno.canal;
+  const showTotal  = canal === 'todos';
+  const showSede   = canal === 'todos' || canal === 'sede';
+  const showFilial = canal === 'todos' || canal === 'filial';
+
+  let html = '';
+  if (showTotal) {
+    html += cardHTML({
+      type: 'total',
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>',
+      title: 'Total Geral',
+      subtitle: 'Breno Sede + Breno Filial',
+      metrics: [
+        { label: 'Investimento', value: fmtBRL(total.investimento) },
+        { label: 'N° Leads', value: fmtNum(total.leads) },
+        { label: 'N° Potenciais', value: fmtNum(total.potenciais) },
+        { label: 'N° Potenciais Reais', value: fmtNum(total.potenciaisReais) },
+        { label: 'N° Leads Aptas', value: fmtNum(total.leadsAptas) },
+      ],
+      wide: true,
+    });
+  }
+  if (showSede || showFilial) {
+    html += '<div class="cards-row">';
+    if (showSede) {
+      html += cardHTML({
+        type: 'sede',
+        icon: 'S',
+        title: 'Breno Sede',
+        subtitle: '',
+        metrics: [
+          { label: 'Investimento', value: fmtBRL(d.sede.investimento) },
+          { label: 'N° Leads', value: fmtNum(d.sede.leads) },
+          { label: 'N° Potenciais', value: fmtNum(d.sede.potenciais) },
+          { label: 'N° Potenciais Reais', value: fmtNum(d.sede.potenciaisReais) },
+          { label: 'N° Leads Aptas', value: fmtNum(d.sede.leadsAptas) },
+        ],
+      });
+    }
+    if (showFilial) {
+      html += cardHTML({
+        type: 'filial',
+        icon: 'F',
+        title: 'Breno Filial',
+        subtitle: '',
+        metrics: [
+          { label: 'Investimento', value: fmtBRL(d.filial.investimento) },
+          { label: 'N° Leads', value: fmtNum(d.filial.leads) },
+          { label: 'N° Potenciais', value: fmtNum(d.filial.potenciais) },
+          { label: 'N° Potenciais Reais', value: fmtNum(d.filial.potenciaisReais) },
+          { label: 'N° Leads Aptas', value: fmtNum(d.filial.leadsAptas) },
+        ],
+      });
+    }
+    html += '</div>';
+  }
+  container.innerHTML = html;
+}
+
 /* ===== REFRESH ===== */
 function updateTimestamps() {
   const now = new Date();
   const hms = now.toTimeString().slice(0, 8);
   document.getElementById('ultimaAtt').textContent = hms;
+  const bEl = document.getElementById('bUltimaAtt');
+  if (bEl) bEl.textContent = hms;
 }
 
 function startCountdown() {
@@ -298,32 +493,77 @@ function startCountdown() {
     state.countdown--;
     const min = String(Math.floor(state.countdown / 60)).padStart(2, '0');
     const sec = String(state.countdown % 60).padStart(2, '0');
-    document.getElementById('proximaAtt').textContent = `${min}:${sec}`;
+    const txt = `${min}:${sec}`;
+    document.getElementById('proximaAtt').textContent = txt;
+    const bEl = document.getElementById('bProximaAtt');
+    if (bEl) bEl.textContent = txt;
 
     if (state.countdown <= 0) {
-      doRefresh();
+      clearInterval(state.refreshTimer);
+      state.refreshTimer = null;
+      doRefresh(true); // auto-refresh: silencioso, sem skeleton
     }
   }, 1000);
 }
 
-async function doRefresh() {
+async function doRefresh(silencioso = false) {
+  if (!silencioso) {
+    state.carregando = true;
+    stateBreno.carregando = true;
+    renderCards();
+    renderCardsBreno();
+  }
   await fetchData();
+  state.carregando = false;
+  stateBreno.carregando = false;
   renderCards();
+  renderCardsBreno();
   updateTimestamps();
   startCountdown();
 }
 
 /* ===== NAVIGATION ===== */
+function navegarPara(page) {
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+
+  const item = document.querySelector(`.nav-item[data-page="${page}"]`);
+  if (item) item.classList.add('active');
+  const pageEl = document.getElementById('page-' + page);
+  if (pageEl) pageEl.classList.add('active');
+
+  // Marca (e mantém aberto) o grupo que contém a página ativa
+  document.querySelectorAll('.nav-group').forEach(g => {
+    const contem = g.querySelector(`[data-page="${page}"]`);
+    g.classList.toggle('tem-ativo', !!contem);
+    if (contem) g.classList.add('aberto');
+  });
+}
+
+// Sub-itens (Visão Geral, Por Dia, Relatório, Perfil...)
 document.querySelectorAll('.nav-item').forEach(item => {
   item.addEventListener('click', e => {
     e.preventDefault();
-    const page = item.dataset.page;
-    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-    item.classList.add('active');
-    document.getElementById('page-' + page).classList.add('active');
+    navegarPara(item.dataset.page);
   });
 });
+
+// Cabeçalho do grupo: o texto navega pra Visão Geral do painel e abre a lista;
+// o chevron (seta) só abre/fecha, sem navegar.
+document.querySelectorAll('.nav-group-header').forEach(header => {
+  const grupo = header.closest('.nav-group');
+  header.addEventListener('click', e => {
+    if (e.target.closest('.nav-chevron')) {
+      grupo.classList.toggle('aberto');
+      return;
+    }
+    grupo.classList.add('aberto');
+    navegarPara(header.dataset.page);
+  });
+});
+
+// Avatar/nome no topo abrem o Perfil
+document.getElementById('abrirPerfil').addEventListener('click', () => navegarPara('perfil'));
 
 /* ===== MODO DE FILTRO (período / data / intervalo são exclusivos) ===== */
 function setFiltroModo(modo) {
@@ -418,6 +658,117 @@ document.getElementById('btnAplicarIntervalo').addEventListener('click', () => {
   }
 });
 
+/* ===== FILTROS BRENO ===== */
+function setFiltroModoBreno(modo) {
+  stateBreno.filtroModo = modo;
+  const rowPeriodo   = document.getElementById('bPeriodGroup').closest('.filter-row');
+  const rowData      = document.getElementById('bBtnDataEspecifica').closest('.filter-row');
+  const rowIntervalo = document.getElementById('bBtnIntervalo').closest('.filter-row');
+  rowPeriodo.classList.toggle('filter-disabled', modo !== 'periodo');
+  rowData.classList.toggle('filter-disabled', modo !== 'data');
+  rowIntervalo.classList.toggle('filter-disabled', modo !== 'intervalo');
+  if (modo !== 'periodo') {
+    document.querySelectorAll('#bPeriodGroup .btn-seg').forEach(b => b.classList.remove('active'));
+    stateBreno.periodo = null;
+  }
+  if (modo !== 'data') {
+    stateBreno.dataEspecifica = null;
+    document.getElementById('bInputDataEspecifica').value = '';
+    document.getElementById('bLabelDataEspecifica').textContent = 'Selecionar data específica';
+  }
+  if (modo !== 'intervalo') {
+    stateBreno.intervalo = { de: null, ate: null };
+    document.getElementById('bLabelIntervalo').textContent = 'Selecionar intervalo de datas';
+    const intDiv = document.getElementById('bIntervaloInputs');
+    intDiv.classList.add('hidden');
+    intDiv.style.display = '';
+  }
+}
+
+document.getElementById('bPeriodGroup').addEventListener('click', e => {
+  const btn = e.target.closest('.btn-seg');
+  if (!btn) return;
+  setFiltroModoBreno('periodo');
+  document.querySelectorAll('#bPeriodGroup .btn-seg').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  stateBreno.periodo = btn.dataset.val;
+  stateBreno.data = {
+    sede: agregarRows(filtrarPorDataBreno(rawRowsBreno.sede)),
+    filial: agregarRows(filtrarPorDataBreno(rawRowsBreno.filial)),
+  };
+  atualizarTabelaDiariaBreno();
+  renderCardsBreno();
+});
+
+document.getElementById('bCanalGroup').addEventListener('click', e => {
+  const btn = e.target.closest('.btn-seg');
+  if (!btn) return;
+  document.querySelectorAll('#bCanalGroup .btn-seg').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  stateBreno.canal = btn.dataset.val;
+  renderCardsBreno();
+});
+
+const bBtnDataEsp = document.getElementById('bBtnDataEspecifica');
+const bInputDataEsp = document.getElementById('bInputDataEspecifica');
+bBtnDataEsp.addEventListener('click', () => {
+  if (bInputDataEsp.showPicker) bInputDataEsp.showPicker();
+  else bInputDataEsp.click();
+});
+bInputDataEsp.addEventListener('change', () => {
+  if (!bInputDataEsp.value) return;
+  setFiltroModoBreno('data');
+  stateBreno.dataEspecifica = bInputDataEsp.value;
+  document.getElementById('bLabelDataEspecifica').textContent =
+    new Date(bInputDataEsp.value + 'T12:00:00').toLocaleDateString('pt-BR');
+  stateBreno.data = {
+    sede: agregarRows(filtrarPorDataBreno(rawRowsBreno.sede)),
+    filial: agregarRows(filtrarPorDataBreno(rawRowsBreno.filial)),
+  };
+  atualizarTabelaDiariaBreno();
+  renderCardsBreno();
+});
+
+const bBtnInt = document.getElementById('bBtnIntervalo');
+const bIntervaloDiv = document.getElementById('bIntervaloInputs');
+bBtnInt.addEventListener('click', () => {
+  bIntervaloDiv.classList.toggle('hidden');
+  bIntervaloDiv.style.display = bIntervaloDiv.classList.contains('hidden') ? '' : 'flex';
+});
+document.getElementById('bBtnAplicarIntervalo').addEventListener('click', () => {
+  const de = document.getElementById('bInputDe').value;
+  const ate = document.getElementById('bInputAte').value;
+  if (de && ate) {
+    setFiltroModoBreno('intervalo');
+    stateBreno.intervalo = { de, ate };
+    document.getElementById('bLabelIntervalo').textContent =
+      `${new Date(de + 'T12:00:00').toLocaleDateString('pt-BR')} – ${new Date(ate + 'T12:00:00').toLocaleDateString('pt-BR')}`;
+    bIntervaloDiv.classList.add('hidden');
+    bIntervaloDiv.style.display = '';
+    stateBreno.data = {
+      sede: agregarRows(filtrarPorDataBreno(rawRowsBreno.sede)),
+      filial: agregarRows(filtrarPorDataBreno(rawRowsBreno.filial)),
+    };
+    atualizarTabelaDiariaBreno();
+    renderCardsBreno();
+  }
+});
+
+document.getElementById('bRefreshBtn').addEventListener('click', doRefresh);
+
+document.getElementById('bPageSizeSelect').addEventListener('change', e => {
+  tableStateBreno.pageSize = parseInt(e.target.value);
+  tableStateBreno.page = 1;
+  renderTableBreno();
+});
+document.getElementById('bBtnPrevPage').addEventListener('click', () => {
+  if (tableStateBreno.page > 1) { tableStateBreno.page--; renderTableBreno(); }
+});
+document.getElementById('bBtnNextPage').addEventListener('click', () => {
+  const totalPages = Math.ceil(tableStateBreno.rows.length / tableStateBreno.pageSize);
+  if (tableStateBreno.page < totalPages) { tableStateBreno.page++; renderTableBreno(); }
+});
+
 /* ===== DARK MODE ===== */
 document.getElementById('darkToggle').addEventListener('click', () => {
   const isDark = document.body.classList.toggle('dark');
@@ -438,19 +789,45 @@ const lerSessao = chave =>
 const sessao = {
   usuario: lerSessao('sessaoUsuario'),
   senha: lerSessao('sessaoSenha'),
-  nivel: lerSessao('sessaoNivel'),
+  ehDev: lerSessao('sessaoEhDev') === '1',
+  paineis: (() => {
+    try { return JSON.parse(lerSessao('sessaoPaineis') || '{}'); }
+    catch { return {}; }
+  })(),
 };
 
-/* Permissões por nível:
-   Chefe / Administrador → tudo
-   Consultor             → não cria logins
-   Agente                → não baixa relatórios */
-function podeCriarLogins() {
-  const n = sessao.nivel.toLowerCase();
-  return n.includes('chefe') || n.includes('adm');
+// Nomes amigáveis dos painéis
+const NOMES_PAINEL = { eder: 'Painel Éder', breno: 'Painel Breno' };
+
+/* ===== PERMISSÕES (multi-painel) =====
+   DEV → acesso total. Senão, o nível por painel decide:
+   - Chefe/Administrador → gerencia usuários
+   - Consultor → não cria/gerencia logins
+   - Agente → não baixa relatórios */
+function temAcessoPainel(painel) {
+  return sessao.ehDev || !!sessao.paineis[painel];
 }
-function podeBaixarRelatorios() {
-  return !sessao.nivel.toLowerCase().includes('agente');
+function nivelNoPainel(painel) {
+  if (sessao.ehDev) return 'DEV';
+  return sessao.paineis[painel] || '';
+}
+function podeGerenciarUsuarios() {
+  if (sessao.ehDev) return true;
+  return Object.values(sessao.paineis).some(n => {
+    const x = String(n).toLowerCase();
+    return x.includes('chefe') || x.includes('adm');
+  });
+}
+function podeBaixarRelatorios(painel) {
+  return sessao.ehDev || !!sessao.paineis[painel];
+}
+
+/** Texto resumido do nível para o perfil */
+function resumoNivel() {
+  if (sessao.ehDev) return 'DEV — acesso total';
+  return Object.keys(sessao.paineis)
+    .map(p => `${NOMES_PAINEL[p] || p}: ${sessao.paineis[p]}`)
+    .join(' • ') || 'Sem acesso';
 }
 
 function aplicarSessao() {
@@ -460,22 +837,53 @@ function aplicarSessao() {
 
   document.getElementById('perfilUsuario').value = sessao.usuario;
   document.getElementById('perfilSenha').value = sessao.senha;
-  document.getElementById('perfilNivel').value = sessao.nivel;
+  document.getElementById('perfilNivel').value = sessao.ehDev ? 'DEV' : 'Padrão';
   document.getElementById('perfilNome').textContent = nome;
-  document.getElementById('perfilNivelLabel').textContent = sessao.nivel;
+  document.getElementById('perfilNivelLabel').textContent = resumoNivel();
   document.getElementById('greetingName').textContent = `Olá, ${nome}`;
   renderAvatar();
   renderSeletoresAvatar();
 
-  // Permissões
-  const gestor = podeCriarLogins();
-  document.getElementById('secaoCriarCredencial')
-    .classList.toggle('hidden', !gestor);
-  document.getElementById('secaoGerenciarUsuarios')
-    .classList.toggle('hidden', !gestor);
+  // Grupos de painel na sidebar conforme acesso
+  document.querySelector('.nav-group[data-group="eder"]')
+    .classList.toggle('hidden', !temAcessoPainel('eder'));
+  document.querySelector('.nav-group[data-group="breno"]')
+    .classList.toggle('hidden', !temAcessoPainel('breno'));
+
+  // Relatório do Éder some para quem é Agente no Éder
   document.querySelector('.nav-item[data-page="importar"]')
-    .classList.toggle('hidden', !podeBaixarRelatorios());
+    .classList.toggle('hidden', !podeBaixarRelatorios('eder'));
+  document.querySelector('.nav-item[data-page="breno-importar"]')
+    .classList.toggle('hidden', !podeBaixarRelatorios('breno'));
+
+  // Seções de gestão de usuários
+  const gestor = podeGerenciarUsuarios();
+  document.getElementById('secaoCriarCredencial').classList.toggle('hidden', !gestor);
+  document.getElementById('secaoGerenciarUsuarios').classList.toggle('hidden', !gestor);
   if (gestor) carregarUsuarios();
+
+  // Se a página ativa não é acessível, manda pro primeiro painel disponível
+  garantirPaginaValida();
+}
+
+/** Garante que o usuário não fique numa página sem permissão */
+function garantirPaginaValida() {
+  const ativa = document.querySelector('.page.active');
+  const idAtiva = ativa ? ativa.id : '';
+  const ederOk = temAcessoPainel('eder');
+  const brenoOk = temAcessoPainel('breno');
+
+  const ehPaginaEder = ['page-visao-geral', 'page-por-dia', 'page-importar'].includes(idAtiva);
+  const ehPaginaBreno = ['page-breno-visao-geral', 'page-breno-por-dia', 'page-breno-importar'].includes(idAtiva);
+  const bloqueado =
+    (ehPaginaEder && !ederOk) ||
+    (ehPaginaBreno && !brenoOk);
+
+  if (idAtiva === 'page-perfil' || (!bloqueado && idAtiva)) return;
+
+  if (ederOk) navegarPara('visao-geral');
+  else if (brenoOk) navegarPara('breno-visao-geral');
+  else navegarPara('perfil');
 }
 
 // Já tem sessão salva? Entra direto. Senão, mostra o login.
@@ -503,12 +911,14 @@ document.getElementById('loginForm').addEventListener('submit', async e => {
     if (json.ok) {
       sessao.usuario = json.usuario;
       sessao.senha = senha;
-      sessao.nivel = json.nivel;
+      sessao.ehDev = !!json.ehDev;
+      sessao.paineis = json.paineis || {};
       const lembrar = document.getElementById('loginLembrar').checked;
       const storage = lembrar ? localStorage : sessionStorage;
       storage.setItem('sessaoUsuario', sessao.usuario);
       storage.setItem('sessaoSenha', sessao.senha);
-      storage.setItem('sessaoNivel', sessao.nivel);
+      storage.setItem('sessaoEhDev', sessao.ehDev ? '1' : '0');
+      storage.setItem('sessaoPaineis', JSON.stringify(sessao.paineis));
       aplicarSessao();
       document.getElementById('loginScreen').classList.add('hidden');
       enviarPing();
@@ -645,6 +1055,27 @@ async function carregarUsuarios() {
   }
 }
 
+/** Cor de avatar determinística baseada no nome do usuário */
+function corAvatar(usuario) {
+  const paleta = Object.values(AVATAR_CORES);
+  let hash = 0;
+  for (let i = 0; i < usuario.length; i++) hash = (hash * 31 + usuario.charCodeAt(i)) >>> 0;
+  return paleta[hash % paleta.length];
+}
+
+/** Badges de painel+nível (ou DEV) de um usuário */
+function badgesAcesso(u) {
+  if (u.ehDev) return '<span class="badge dev">DEV</span>';
+  const paineis = u.paineis || {};
+  // Se todos os painéis são Chefe, exibe só "Chefe"
+  const niveis = Object.values(paineis);
+  const todosChefe = niveis.length > 0 && niveis.every(n => n.toLowerCase().includes('chefe'));
+  if (todosChefe) return '<span class="badge chefe">Chefe</span>';
+  return Object.keys(paineis).map(p =>
+    `<span class="badge painel">${NOMES_PAINEL[p] || p}: ${paineis[p]}</span>`
+  ).join('') || '<span class="badge offline">Sem acesso</span>';
+}
+
 function renderUsuarios(usuarios) {
   const lista = document.getElementById('listaUsuarios');
   if (!usuarios.length) {
@@ -656,20 +1087,18 @@ function renderUsuarios(usuarios) {
     const suspenso = u.situacao === 'Suspenso';
     const online = u.status.toLowerCase() === 'online';
     const ehProprio = u.usuario.toLowerCase() === sessao.usuario.toLowerCase();
-    const nivelClasse = 'nivel-' + u.nivel.toLowerCase()
-      .normalize('NFD').replace(/[̀-ͯ]/g, '');
 
     return `
     <div class="usuario-row" data-usuario="${u.usuario}">
-      <div class="usuario-avatar">${u.usuario.charAt(0).toUpperCase()}</div>
+      <div class="usuario-avatar" style="background:${corAvatar(u.usuario)}">${u.usuario.charAt(0).toUpperCase()}</div>
       <div class="usuario-info">
         <div class="usuario-nome">${u.usuario}${ehProprio ? ' (você)' : ''}</div>
         <div class="usuario-meta">
           ${u.criado ? 'Criado: ' + u.criado : ''}${u.ultimoAcesso ? ' • Último acesso: ' + u.ultimoAcesso : ''}
         </div>
+        <div class="usuario-badges" style="margin-top:6px">${badgesAcesso(u)}</div>
       </div>
       <div class="usuario-badges">
-        <span class="badge ${nivelClasse}">${u.nivel}</span>
         ${suspenso
           ? '<span class="badge suspenso">Suspenso</span>'
           : `<span class="badge ${online ? 'online' : 'offline'}">${online ? 'Online' : 'Offline'}</span>`}
@@ -680,54 +1109,15 @@ function renderUsuarios(usuarios) {
           ? `<button class="btn-mini sucesso" data-acao="ativar" data-i="${i}">Reativar</button>`
           : `<button class="btn-mini perigo" data-acao="suspender" data-i="${i}">Suspender</button>`}
       </div>
-    </div>
-    <div class="usuario-editar hidden" id="editar-${i}">
-      <div class="config-field">
-        <label class="config-label">Nova senha (vazio = manter)</label>
-        <div class="input-eye-wrap">
-          <input type="password" class="config-input" id="editSenha-${i}" placeholder="••••••••" />
-          <button type="button" class="btn-eye" data-target="editSenha-${i}" title="Mostrar/ocultar">
-            <svg class="eye-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-            <svg class="eye-closed hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
-          </button>
-        </div>
-      </div>
-      <div class="config-field">
-        <label class="config-label">Nível</label>
-        <select class="config-input" id="editNivel-${i}">
-          ${['Chefe', 'Administrador', 'Consultor', 'Agente'].map(n =>
-            `<option value="${n}" ${u.nivel === n ? 'selected' : ''}>${n}</option>`).join('')}
-        </select>
-      </div>
-      <button class="btn-mini sucesso" data-acao="salvar" data-i="${i}">Salvar</button>
-      <button class="btn-mini" data-acao="cancelar" data-i="${i}">Cancelar</button>
     </div>`;
   }).join('');
 
-  // Ações
   lista.querySelectorAll('[data-acao]').forEach(btn => {
     btn.addEventListener('click', async () => {
-      const i = btn.dataset.i;
-      const u = usuarios[i];
+      const u = usuarios[btn.dataset.i];
       const acao = btn.dataset.acao;
 
-      if (acao === 'editar' || acao === 'cancelar') {
-        document.getElementById(`editar-${i}`).classList.toggle('hidden', acao === 'cancelar');
-        return;
-      }
-
-      if (acao === 'salvar') {
-        const novaSenha = document.getElementById(`editSenha-${i}`).value.trim();
-        const novoNivel = document.getElementById(`editNivel-${i}`).value;
-        btn.disabled = true;
-        try {
-          const json = await apiGestor({ action: 'editarusuario', usuario: u.usuario, novaSenha, novoNivel });
-          gerFeedback(json.ok ? json.mensagem : json.erro, json.ok);
-          if (json.ok) carregarUsuarios();
-        } catch { gerFeedback('Erro de conexão.', false); }
-        btn.disabled = false;
-        return;
-      }
+      if (acao === 'editar') { abrirModalUsuario(u); return; }
 
       if (acao === 'suspender' || acao === 'ativar') {
         btn.disabled = true;
@@ -746,6 +1136,87 @@ function renderUsuarios(usuarios) {
   });
 }
 
+/* ===== MODAL DE EDIÇÃO DE USUÁRIO ===== */
+let usuarioEditando = null;
+const modalEl = document.getElementById('modalUsuario');
+const modalPaineisDiv = document.getElementById('modalPaineis');
+
+function fecharModal() {
+  modalEl.classList.add('hidden');
+  usuarioEditando = null;
+}
+
+function modalFeedback(msg, ok) {
+  const fb = document.getElementById('modalFeedback');
+  fb.textContent = msg;
+  fb.style.color = ok ? '#22c55e' : '#ef4444';
+  fb.classList.remove('hidden');
+  setTimeout(() => fb.classList.add('hidden'), 3500);
+}
+
+function abrirModalUsuario(u) {
+  usuarioEditando = u;
+  document.getElementById('modalNome').textContent = u.usuario;
+  document.getElementById('modalStatus').textContent =
+    u.ehDev ? 'Conta DEV' : (u.situacao === 'Suspenso' ? 'Suspenso' : u.status);
+  document.getElementById('modalAvatar').textContent = u.usuario.charAt(0).toUpperCase();
+  document.getElementById('modalSenha').value = '';
+  document.getElementById('modalFeedback').classList.add('hidden');
+
+  const infos = [];
+  if (u.criado) infos.push(['Criado em', u.criado]);
+  if (u.ultimoAcesso) infos.push(['Último acesso', u.ultimoAcesso]);
+  infos.push(['Status', u.status]);
+  infos.push(['Situação', u.situacao]);
+  document.getElementById('modalInfos').innerHTML = infos.map(([k, v]) =>
+    `<div class="info-linha"><span>${k}</span><strong>${v}</strong></div>`).join('');
+
+  montarSeletorPaineis(modalPaineisDiv, u.ehDev ? {} : u.paineis);
+
+  modalEl.classList.remove('hidden');
+}
+
+document.getElementById('modalFechar').addEventListener('click', fecharModal);
+modalEl.addEventListener('click', e => { if (e.target === modalEl) fecharModal(); });
+document.getElementById('modalSelTudo').addEventListener('click', () => marcarTodosPaineis(modalPaineisDiv, true));
+document.getElementById('modalLimparTudo').addEventListener('click', () => marcarTodosPaineis(modalPaineisDiv, false));
+
+document.getElementById('modalSalvar').addEventListener('click', async () => {
+  if (!usuarioEditando) return;
+  const novaSenha = document.getElementById('modalSenha').value.trim();
+  const ehDev = false;
+  const paineis = lerSeletorPaineis(modalPaineisDiv);
+  if (!ehDev && !paineis) return modalFeedback('Marque ao menos um painel.', false);
+
+  const btn = document.getElementById('modalSalvar');
+  btn.disabled = true;
+  try {
+    const json = await apiGestor({
+      action: 'editarusuario',
+      usuario: usuarioEditando.usuario,
+      novaSenha, paineis,
+      dev: ehDev ? '1' : '0',
+    });
+    if (json.ok) { fecharModal(); gerFeedback(json.mensagem, true); carregarUsuarios(); }
+    else modalFeedback(json.erro, false);
+  } catch { modalFeedback('Erro de conexão.', false); }
+  btn.disabled = false;
+});
+
+document.getElementById('modalExcluir').addEventListener('click', async () => {
+  if (!usuarioEditando) return;
+  if (!confirm(`Excluir o usuário "${usuarioEditando.usuario}"? Esta ação não pode ser desfeita.`)) return;
+
+  const btn = document.getElementById('modalExcluir');
+  btn.disabled = true;
+  try {
+    const json = await apiGestor({ action: 'excluirusuario', usuario: usuarioEditando.usuario });
+    if (json.ok) { fecharModal(); gerFeedback(json.mensagem, true); carregarUsuarios(); }
+    else modalFeedback(json.erro, false);
+  } catch { modalFeedback('Verificando...', false); setTimeout(() => { fecharModal(); carregarUsuarios(); }, 2000); }
+  btn.disabled = false;
+});
+
 document.getElementById('btnRecarregarUsuarios').addEventListener('click', carregarUsuarios);
 
 /* Aviso em tempo real: senhas não coincidem */
@@ -763,7 +1234,7 @@ document.getElementById('btnSair').addEventListener('click', () => {
   if (SHEETS_API_URL && sessao.usuario) {
     fetch(`${SHEETS_API_URL}?action=logout&usuario=${encodeURIComponent(sessao.usuario)}`).catch(() => {});
   }
-  ['sessaoUsuario', 'sessaoSenha', 'sessaoNivel'].forEach(k => {
+  ['sessaoUsuario', 'sessaoSenha', 'sessaoEhDev', 'sessaoPaineis'].forEach(k => {
     localStorage.removeItem(k);
     sessionStorage.removeItem(k);
   });
@@ -771,10 +1242,65 @@ document.getElementById('btnSair').addEventListener('click', () => {
 });
 
 /* ===== PERFIL: criar nova credencial (ADM) ===== */
+/* ===== SELETOR DE PAINÉIS (reutilizado em criar e editar) ===== */
+const NIVEIS = ['Administrador', 'Consultor', 'Agente'];
+
+/** Monta as linhas de painel num container. `valores` = {eder:'Administrador', ...} */
+function montarSeletorPaineis(container, valores) {
+  valores = valores || {};
+  container.innerHTML = Object.keys(NOMES_PAINEL).map(p => {
+    const marcado = !!valores[p];
+    const nivelSel = valores[p] || 'Administrador';
+    return `
+      <label class="painel-linha ${marcado ? 'marcado' : ''}" data-painel="${p}">
+        <input type="checkbox" class="painel-check" data-painel="${p}" ${marcado ? 'checked' : ''}>
+        <span class="painel-nome">${NOMES_PAINEL[p]}</span>
+        <select class="painel-nivel" data-painel="${p}" ${marcado ? '' : 'disabled'}>
+          ${NIVEIS.map(n => `<option ${n === nivelSel ? 'selected' : ''}>${n}</option>`).join('')}
+        </select>
+      </label>`;
+  }).join('');
+
+  container.querySelectorAll('.painel-check').forEach(chk => {
+    chk.addEventListener('change', () => {
+      const linha = chk.closest('.painel-linha');
+      linha.querySelector('.painel-nivel').disabled = !chk.checked;
+      linha.classList.toggle('marcado', chk.checked);
+    });
+  });
+}
+
+/** Lê o container e devolve "eder=Administrador;breno=Agente" */
+function lerSeletorPaineis(container) {
+  const partes = [];
+  container.querySelectorAll('.painel-linha').forEach(linha => {
+    const chk = linha.querySelector('.painel-check');
+    if (chk.checked) {
+      partes.push(`${chk.dataset.painel}=${linha.querySelector('.painel-nivel').value}`);
+    }
+  });
+  return partes.join(';');
+}
+
+function marcarTodosPaineis(container, marcar) {
+  container.querySelectorAll('.painel-check').forEach(chk => {
+    chk.checked = marcar;
+    chk.dispatchEvent(new Event('change'));
+  });
+}
+
+// Monta o seletor da criação e liga os botões "selecionar/limpar tudo"
+const novoPaineisDiv = document.getElementById('novoPaineis');
+montarSeletorPaineis(novoPaineisDiv, { eder: 'Administrador' });
+document.getElementById('novoSelTudo').addEventListener('click', () => marcarTodosPaineis(novoPaineisDiv, true));
+document.getElementById('novoLimparTudo').addEventListener('click', () => marcarTodosPaineis(novoPaineisDiv, false));
+
 document.getElementById('btnCriarCredencial').addEventListener('click', async () => {
   const novoUsuario = document.getElementById('novoUsuario').value.trim();
   const novaSenha = document.getElementById('novaSenha').value.trim();
   const confirmaSenha = document.getElementById('confirmaSenha').value.trim();
+  const ehDev = false;
+  const paineis = lerSeletorPaineis(novoPaineisDiv);
   const fb = document.getElementById('credFeedback');
 
   const mostrarFb = (msg, ok) => {
@@ -784,38 +1310,30 @@ document.getElementById('btnCriarCredencial').addEventListener('click', async ()
     setTimeout(() => fb.classList.add('hidden'), 3500);
   };
 
-  if (!novoUsuario || !novaSenha) {
-    mostrarFb('Preencha o novo usuário e a senha.', false);
-    return;
-  }
-  if (novaSenha !== confirmaSenha) {
-    mostrarFb('As senhas não coincidem.', false);
-    return;
-  }
-  if (!SHEETS_API_URL) {
-    mostrarFb('Configure a SHEETS_API_URL no script.js primeiro.', false);
-    return;
-  }
+  if (!novoUsuario || !novaSenha) return mostrarFb('Preencha o novo usuário e a senha.', false);
+  if (novaSenha !== confirmaSenha) return mostrarFb('As senhas não coincidem.', false);
+  if (!ehDev && !paineis) return mostrarFb('Marque ao menos um painel.', false);
+  if (!SHEETS_API_URL) return mostrarFb('Configure a SHEETS_API_URL no script.js primeiro.', false);
 
   try {
-    const params = new URLSearchParams({
+    const json = await apiGestor({
       action: 'criarlogin',
-      admUsuario: sessao.usuario,
-      admSenha: sessao.senha,
       novoUsuario, novaSenha,
-      nivel: document.getElementById('novoNivel').value,
+      paineis,
+      dev: ehDev ? '1' : '0',
     });
-    const res = await fetch(`${SHEETS_API_URL}?${params}`);
-    const json = await res.json();
     mostrarFb(json.ok ? json.mensagem : json.erro, json.ok);
     if (json.ok) {
       document.getElementById('novoUsuario').value = '';
       document.getElementById('novaSenha').value = '';
       document.getElementById('confirmaSenha').value = '';
+      document.getElementById('novoDev').checked = false;
+      montarSeletorPaineis(novoPaineisDiv, { eder: 'Administrador' });
       carregarUsuarios();
     }
   } catch (e) {
-    mostrarFb('Erro de conexão com a planilha.', false);
+    mostrarFb('Verificando operação...', false);
+    setTimeout(() => carregarUsuarios(), 2000);
   }
 });
 
@@ -925,6 +1443,7 @@ document.getElementById('topRefreshBtn').addEventListener('click', doRefresh);
 
 /* ===== IMPORTAR RELATÓRIO ===== */
 const repState = { tipo: 'consolidado', canal: 'todos', formato: 'excel' };
+const bRepState = { tipo: 'consolidado', canal: 'todos', formato: 'excel' };
 
 document.getElementById('repTipoGroup').addEventListener('click', e => {
   const btn = e.target.closest('.btn-seg');
@@ -982,13 +1501,13 @@ function getRelatorioRowsConsolidado() {
 
   const rows = [];
   if (repState.canal === 'todos') {
-    rows.push(linha('AMO Sede', sede));
-    rows.push(linha('AMO Filial', filial));
+    rows.push(linha('Éder Sede', sede));
+    rows.push(linha('Éder Filial', filial));
     rows.push(linha('Total Geral', calcTotal({ sede, filial })));
   } else if (repState.canal === 'sede') {
-    rows.push(linha('AMO Sede', sede));
+    rows.push(linha('Éder Sede', sede));
   } else {
-    rows.push(linha('AMO Filial', filial));
+    rows.push(linha('Éder Filial', filial));
   }
   return rows;
 }
@@ -997,10 +1516,10 @@ function getRelatorioRowsConsolidado() {
 function getRelatorioRowsDiario() {
   let rows = [];
   if (repState.canal === 'todos' || repState.canal === 'sede') {
-    rows.push(...repFiltrarRows(rawRows.sede).map(r => ({ ...r, canal: 'AMO Sede' })));
+    rows.push(...repFiltrarRows(rawRows.sede).map(r => ({ ...r, canal: 'Éder Sede' })));
   }
   if (repState.canal === 'todos' || repState.canal === 'filial') {
-    rows.push(...repFiltrarRows(rawRows.filial).map(r => ({ ...r, canal: 'AMO Filial' })));
+    rows.push(...repFiltrarRows(rawRows.filial).map(r => ({ ...r, canal: 'Éder Filial' })));
   }
   rows.sort((a, b) => b.data.localeCompare(a.data) || a.canal.localeCompare(b.canal));
 
@@ -1120,9 +1639,150 @@ document.getElementById('btnBaixarRelatorio').addEventListener('click', () => {
   setTimeout(() => fb.classList.add('hidden'), 2500);
 });
 
+document.getElementById('bRepTipoGroup').addEventListener('click', e => {
+  const btn = e.target.closest('.btn-seg');
+  if (!btn) return;
+  document.querySelectorAll('#bRepTipoGroup .btn-seg').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  bRepState.tipo = btn.dataset.val;
+});
+document.getElementById('bRepCanalGroup').addEventListener('click', e => {
+  const btn = e.target.closest('.btn-seg');
+  if (!btn) return;
+  document.querySelectorAll('#bRepCanalGroup .btn-seg').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  bRepState.canal = btn.dataset.val;
+});
+document.getElementById('bRepFormatoGroup').addEventListener('click', e => {
+  const btn = e.target.closest('.btn-seg');
+  if (!btn) return;
+  document.querySelectorAll('#bRepFormatoGroup .btn-seg').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  bRepState.formato = btn.dataset.val;
+});
+
+function bRepFiltrarRows(rows) {
+  const de = document.getElementById('bRepDe').value;
+  const ate = document.getElementById('bRepAte').value;
+  if (!de && !ate) return rows;
+  return rows.filter(r => (!de || r.data >= de) && (!ate || r.data <= ate));
+}
+
+function getBRelatorioRows() {
+  if (bRepState.tipo === 'diario') {
+    let rows = [];
+    if (bRepState.canal === 'todos' || bRepState.canal === 'sede')
+      rows.push(...bRepFiltrarRows(rawRowsBreno.sede).map(r => ({ ...r, canal: 'Breno Sede' })));
+    if (bRepState.canal === 'todos' || bRepState.canal === 'filial')
+      rows.push(...bRepFiltrarRows(rawRowsBreno.filial).map(r => ({ ...r, canal: 'Breno Filial' })));
+    rows.sort((a, b) => b.data.localeCompare(a.data) || a.canal.localeCompare(b.canal));
+    return rows.map(r => ({
+      'Data': new Date(r.data + 'T12:00:00').toLocaleDateString('pt-BR'),
+      'Canal': r.canal,
+      'Investimento': fmtBRL(r.investimento || 0),
+      'N° Leads': fmtNum(r.leads || 0),
+      'N° Potenciais': fmtNum(r.potenciaisCLT || 0),
+      'N° Potenciais Reais': fmtNum(r.potenciaisReais || 0),
+      'N° Leads Aptas': fmtNum(r.leadsAptas || 0),
+    }));
+  }
+  // consolidado
+  const linha = (nome, m) => ({
+    'Canal': nome,
+    'Investimento': fmtBRL(m.investimento),
+    'N° Leads': fmtNum(m.leads),
+    'N° Potenciais': fmtNum(m.potenciais),
+    'N° Potenciais Reais': fmtNum(m.potenciaisReais),
+    'N° Leads Aptas': fmtNum(m.leadsAptas),
+  });
+  const sede = agregarRows(bRepFiltrarRows(rawRowsBreno.sede));
+  const filial = agregarRows(bRepFiltrarRows(rawRowsBreno.filial));
+  const rows = [];
+  if (bRepState.canal === 'todos') {
+    rows.push(linha('Breno Sede', sede));
+    rows.push(linha('Breno Filial', filial));
+    rows.push(linha('Total Geral', calcTotal({ sede, filial })));
+  } else if (bRepState.canal === 'sede') {
+    rows.push(linha('Breno Sede', sede));
+  } else {
+    rows.push(linha('Breno Filial', filial));
+  }
+  return rows;
+}
+
+function getBPeriodoLabel() {
+  const de = document.getElementById('bRepDe').value;
+  const ate = document.getElementById('bRepAte').value;
+  if (de && ate) {
+    const f = v => new Date(v + 'T12:00:00').toLocaleDateString('pt-BR');
+    return `${f(de)} a ${f(ate)}`;
+  }
+  return 'Todo o período';
+}
+
+document.getElementById('bBtnBaixarRelatorio').addEventListener('click', () => {
+  const rows = getBRelatorioRows();
+  const fb = document.getElementById('bRepFeedback');
+  if (!rows.length) {
+    fb.textContent = 'Nenhum dado no período selecionado.';
+    fb.style.color = '#ef4444';
+    fb.classList.remove('hidden');
+    setTimeout(() => fb.classList.add('hidden'), 3000);
+    return;
+  }
+  if (bRepState.formato === 'excel') {
+    const aoa = [
+      ['Relatório de Performance — AMO Breno'],
+      [`Período: ${getBPeriodoLabel()}`],
+      [`Gerado em: ${new Date().toLocaleString('pt-BR')}`],
+      [],
+      Object.keys(rows[0]),
+      ...rows.map(r => Object.values(r)),
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = Object.keys(rows[0]).map(h => ({ wch: Math.max(14, h.length + 4) }));
+    ws['!merges'] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: Object.keys(rows[0]).length - 1 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: Object.keys(rows[0]).length - 1 } },
+      { s: { r: 2, c: 0 }, e: { r: 2, c: Object.keys(rows[0]).length - 1 } },
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Relatório');
+    XLSX.writeFile(wb, `relatorio-breno-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  } else {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    doc.setFontSize(16);
+    doc.text('Relatório de Performance — AMO Breno', 14, 18);
+    doc.setFontSize(10);
+    doc.setTextColor(110);
+    doc.text(`Período: ${getBPeriodoLabel()}`, 14, 26);
+    doc.text(`Gerado em: ${new Date().toLocaleString('pt-BR')}`, 14, 32);
+    doc.autoTable({
+      startY: 40,
+      head: [Object.keys(rows[0])],
+      body: rows.map(r => Object.values(r)),
+      styles: { fontSize: 9 },
+      headStyles: { fillColor: [99, 102, 241] },
+      theme: 'striped',
+    });
+    doc.save(`relatorio-breno-${new Date().toISOString().slice(0, 10)}.pdf`);
+  }
+  fb.textContent = 'Relatório gerado!';
+  fb.style.color = '#22c55e';
+  fb.classList.remove('hidden');
+  setTimeout(() => fb.classList.add('hidden'), 2500);
+});
+
 /* ===== VISUALIZAÇÃO POR DIA ===== */
 const tableState = {
   rows: [],       // todos os registros diários
+  page: 1,
+  pageSize: 50,
+};
+
+const tableStateBreno = {
+  rows: [],
   page: 1,
   pageSize: 50,
 };
@@ -1173,7 +1833,7 @@ function renderTable() {
     return `
     <tr class="${alt ? 'row-dia-alt' : ''}">
       <td>${new Date(r.data + 'T12:00:00').toLocaleDateString('pt-BR')}</td>
-      <td><span class="canal-badge ${r.canal}">${r.canal === 'sede' ? 'AMO Sede' : 'AMO Filial'}</span></td>
+      <td><span class="canal-badge ${r.canal}">${r.canal === 'sede' ? 'Éder Sede' : 'Éder Filial'}</span></td>
       <td>${fmtBRL(r.investimento)}</td>
       <td>${fmtNum(r.leads)}</td>
       <td>${fmtNum(r.potenciais)}</td>
@@ -1188,6 +1848,45 @@ function renderTable() {
     `Página ${tableState.page} de ${totalPages}`;
   document.getElementById('btnPrevPage').disabled = tableState.page <= 1;
   document.getElementById('btnNextPage').disabled = tableState.page >= totalPages;
+}
+
+function renderTableBreno() {
+  const tbody = document.getElementById('bTableBody');
+  if (!tbody) return;
+  const total = tableStateBreno.rows.length;
+  const totalPages = Math.max(1, Math.ceil(total / tableStateBreno.pageSize));
+  if (tableStateBreno.page > totalPages) tableStateBreno.page = totalPages;
+
+  const ini = (tableStateBreno.page - 1) * tableStateBreno.pageSize;
+  const fim = Math.min(ini + tableStateBreno.pageSize, total);
+  const pageRows = tableStateBreno.rows.slice(ini, fim);
+
+  let ultimaData = null, alt = false;
+  tbody.innerHTML = pageRows.map(r => {
+    if (r.data !== ultimaData) {
+      if (ultimaData !== null) alt = !alt;
+      ultimaData = r.data;
+    }
+    return `
+    <tr class="${alt ? 'row-dia-alt' : ''}">
+      <td>${new Date(r.data + 'T12:00:00').toLocaleDateString('pt-BR')}</td>
+      <td><span class="canal-badge ${r.canal}">${r.canal === 'sede' ? 'Breno Sede' : 'Breno Filial'}</span></td>
+      <td>${fmtBRL(r.investimento)}</td>
+      <td>${fmtNum(r.leads)}</td>
+      <td>${fmtNum(r.potenciais)}</td>
+      <td>${fmtNum(r.potenciaisReais)}</td>
+      <td>${fmtNum(r.leadsAptas)}</td>
+    </tr>`;
+  }).join('');
+
+  const countEl = document.getElementById('bTableCount');
+  if (countEl) countEl.textContent = total ? `Exibindo ${ini + 1}–${fim} de ${fmtNum(total)} registros` : 'Nenhum registro';
+  const pageInfoEl = document.getElementById('bPageInfo');
+  if (pageInfoEl) pageInfoEl.textContent = `Página ${tableStateBreno.page} de ${totalPages}`;
+  const prevBtn = document.getElementById('bBtnPrevPage');
+  const nextBtn = document.getElementById('bBtnNextPage');
+  if (prevBtn) prevBtn.disabled = tableStateBreno.page <= 1;
+  if (nextBtn) nextBtn.disabled = tableStateBreno.page >= totalPages;
 }
 
 document.getElementById('pageSizeSelect').addEventListener('change', e => {
@@ -1220,3 +1919,9 @@ setFiltroModo('periodo');
 document.querySelector('#periodGroup .btn-seg[data-val="hoje"]').classList.add('active');
 state.periodo = 'hoje';
 doRefresh();
+setFiltroModoBreno('periodo');
+const bPeriodBtn = document.querySelector('#bPeriodGroup .btn-seg[data-val="hoje"]');
+if (bPeriodBtn) bPeriodBtn.classList.add('active');
+stateBreno.periodo = 'hoje';
+renderCardsBreno();
+renderTableBreno();
