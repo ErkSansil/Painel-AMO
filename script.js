@@ -22,6 +22,9 @@
    cole aqui a URL que termina em /exec                          */
 const SHEETS_API_URL = 'https://script.google.com/macros/s/AKfycbzCbNRSL9vyBpYI3rjNxz8a5cybZfh5t9e-vzc2dq9ZplbEw2bQT6L1i8gqykFLv5f_UA/exec';
 
+/* ===== VERSÃO ===== */
+const VERSAO = 'Beta 2.0';
+
 /* ===== STATE ===== */
 const state = {
   filtroModo: 'periodo', // 'periodo' | 'data' | 'intervalo'
@@ -64,6 +67,7 @@ function calcTotal(d) {
     leadsAptas: d.sede.leadsAptas + d.filial.leadsAptas,
     potenciais: d.sede.potenciais + d.filial.potenciais,
     potenciaisReais: d.sede.potenciaisReais + d.filial.potenciaisReais,
+    vendasCLT: d.sede.vendasCLT + d.filial.vendasCLT,
   };
 }
 
@@ -71,6 +75,7 @@ function calcTotal(d) {
 // Linhas diárias cruas vindas da planilha (uma por dia, por canal)
 let rawRows = { sede: [], filial: [] };
 let rawRowsBreno = { sede: [], filial: [] };
+let rawRowsVendas = [];
 
 const stateBreno = {
   filtroModo: 'periodo',
@@ -80,6 +85,25 @@ const stateBreno = {
   intervalo: { de: null, ate: null },
   data: null,
   carregando: false,
+};
+
+const stateVendas = {
+  filtroModo: 'periodo',
+  periodo: '30d',
+  dataEspecifica: null,
+  intervalo: { de: null, ate: null },
+  data: null,
+  carregando: false,
+};
+
+// Estado separado para os filtros da tabela "por dia" de Vendas
+const stateVendasTab = {
+  filtroModo: 'periodo',
+  periodo: '30d',
+  dataEspecifica: null,
+  intervalo: { de: null, ate: null },
+  canal: 'todos',   // todos | sede | filial
+  aptas: 'todas',   // todas | sem | so
 };
 
 async function fetchData() {
@@ -121,6 +145,11 @@ async function fetchData() {
       filial: agregarRows(filtrarPorDataBreno(rawRowsBreno.filial)),
     };
     atualizarTabelaDiariaBreno();
+
+    rawRowsVendas = json.vendas || [];
+    stateVendas.data = agregarVendas(filtrarPorDataVendas(rawRowsVendas));
+    atualizarTabelaDiariaVendas();
+    renderCardsVendas();
 
     // Horários de última alteração detectados pela API
     if (json.ultimaAttLeads) {
@@ -197,6 +226,54 @@ function filtrarPorDataBreno(rows) {
   return rows.filter(r => { const d = dia(r.data); return d >= inicio && d <= hoje; });
 }
 
+function filtrarPorDataVendas(rows) {
+  const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+  const dia = d => { const x = new Date(d + 'T00:00:00'); x.setHours(0, 0, 0, 0); return x; };
+
+  if (stateVendas.filtroModo === 'data' && stateVendas.dataEspecifica) {
+    return rows.filter(r => r.data === stateVendas.dataEspecifica);
+  }
+  if (stateVendas.filtroModo === 'intervalo' && stateVendas.intervalo.de && stateVendas.intervalo.ate) {
+    const de = dia(stateVendas.intervalo.de), ate = dia(stateVendas.intervalo.ate);
+    return rows.filter(r => { const d = dia(r.data); return d >= de && d <= ate; });
+  }
+  const p = stateVendas.periodo || 'hoje';
+  if (p === 'hoje') return rows.filter(r => +dia(r.data) === +hoje);
+  if (p === 'ontem') {
+    const ontem = new Date(hoje); ontem.setDate(ontem.getDate() - 1);
+    return rows.filter(r => +dia(r.data) === +ontem);
+  }
+  const dias = parseInt(p) || 30;
+  const inicio = new Date(hoje); inicio.setDate(inicio.getDate() - (dias - 1));
+  return rows.filter(r => { const d = dia(r.data); return d >= inicio && d <= hoje; });
+}
+
+function agregarVendas(rows) {
+  function contar(arr) {
+    return {
+      contratos: arr.length,
+      validadas: arr.filter(r => r.status === 'VALIDADA').length,
+      canceladas: arr.filter(r => r.status === 'CANCELADA').length,
+      naoValidadas: arr.filter(r => r.status === 'NAO_VALIDADA').length,
+    };
+  }
+  const semAptas = rows.filter(r => !r.isApta);
+  const aptas    = rows.filter(r => r.isApta);
+  return {
+    geral:       contar(semAptas),
+    aptas:       contar(aptas),
+    sede:        contar(semAptas.filter(r => r.canal === 'sede')),
+    filial:      contar(semAptas.filter(r => r.canal === 'filial')),
+    sedeAptas:   contar(aptas.filter(r => r.canal === 'sede')),
+    filialAptas: contar(aptas.filter(r => r.canal === 'filial')),
+  };
+}
+
+function atualizarTabelaDiariaVendas() {
+  // tabela por dia de vendas — será implementada junto com os cards
+  renderTableVendas();
+}
+
 /** Soma as linhas diárias nos totais dos cards */
 function agregarRows(rows) {
   return rows.reduce((acc, r) => ({
@@ -205,7 +282,8 @@ function agregarRows(rows) {
     potenciais: acc.potenciais + (r.potenciaisCLT || 0),
     potenciaisReais: acc.potenciaisReais + (r.potenciaisReais || 0),
     leadsAptas: acc.leadsAptas + (r.leadsAptas || 0),
-  }), { investimento: 0, leads: 0, potenciais: 0, potenciaisReais: 0, leadsAptas: 0 });
+    vendasCLT: acc.vendasCLT + (r.vendasCLT || 0),
+  }), { investimento: 0, leads: 0, potenciais: 0, potenciaisReais: 0, leadsAptas: 0, vendasCLT: 0 });
 }
 
 /** Alimenta a tabela "Visualização por Dia" com os dados reais */
@@ -222,6 +300,7 @@ function atualizarTabelaDiaria() {
     leads: r.leads || 0,
     potenciais: r.potenciaisCLT || 0,
     potenciaisReais: r.potenciaisReais || 0,
+    vendasCLT: r.vendasCLT || 0,
     leadsAptas: r.leadsAptas || 0,
   }));
   tableState.page = 1;
@@ -241,6 +320,7 @@ function atualizarTabelaDiariaBreno() {
     leads: r.leads || 0,
     potenciais: r.potenciaisCLT || 0,
     potenciaisReais: r.potenciaisReais || 0,
+    vendasCLT: r.vendasCLT || 0,
     leadsAptas: r.leadsAptas || 0,
   }));
   tableStateBreno.page = 1;
@@ -271,7 +351,7 @@ function renderCards() {
           </div>
         </div>
         <div class="card-metrics">
-          ${['Investimento','N° Leads','N° Potenciais','N° Potenciais Reais','N° Leads Aptas']
+          ${['Investimento','N° Leads','N° Potenciais','N° Potenciais Reais','N° Vendas Potenciais','N° Leads Aptas']
             .map(l => `<div class="metric-item"><div class="metric-label">${l}</div>${skVal}</div>`)
             .join('')}
         </div>
@@ -314,6 +394,7 @@ function renderCards() {
         { label: 'N° Leads', value: fmtNum(total.leads) },
         { label: 'N° Potenciais', value: fmtNum(total.potenciais) },
         { label: 'N° Potenciais Reais', value: fmtNum(total.potenciaisReais) },
+        { label: 'N° Vendas Potenciais', value: fmtNum(total.vendasCLT) },
         { label: 'N° Leads Aptas', value: fmtNum(total.leadsAptas) },
       ],
       wide: true,
@@ -333,6 +414,7 @@ function renderCards() {
           { label: 'N° Leads', value: fmtNum(d.sede.leads) },
           { label: 'N° Potenciais', value: fmtNum(d.sede.potenciais) },
           { label: 'N° Potenciais Reais', value: fmtNum(d.sede.potenciaisReais) },
+          { label: 'N° Vendas Potenciais', value: fmtNum(d.sede.vendasCLT) },
           { label: 'N° Leads Aptas', value: fmtNum(d.sede.leadsAptas) },
         ],
       });
@@ -348,6 +430,7 @@ function renderCards() {
           { label: 'N° Leads', value: fmtNum(d.filial.leads) },
           { label: 'N° Potenciais', value: fmtNum(d.filial.potenciais) },
           { label: 'N° Potenciais Reais', value: fmtNum(d.filial.potenciaisReais) },
+          { label: 'N° Vendas Potenciais', value: fmtNum(d.filial.vendasCLT) },
           { label: 'N° Leads Aptas', value: fmtNum(d.filial.leadsAptas) },
         ],
       });
@@ -358,7 +441,7 @@ function renderCards() {
   container.innerHTML = html;
 }
 
-function cardHTML({ type, icon, title, subtitle, metrics, wide }) {
+function cardHTML({ type, icon, title, subtitle, metrics, wide, extraStyle, extraClass }) {
   const metricItems = metrics.map(m => `
     <div class="metric-item">
       <div class="metric-label">${m.label}</div>
@@ -366,8 +449,10 @@ function cardHTML({ type, icon, title, subtitle, metrics, wide }) {
     </div>
   `).join('');
 
+  const style = ['margin-bottom:16px', extraStyle].filter(Boolean).join(';');
+  const cls = ['metric-card', wide ? 'card-total' : '', extraClass || ''].filter(Boolean).join(' ');
   return `
-    <div class="metric-card${wide ? ' card-total' : ''}" style="margin-bottom:16px">
+    <div class="${cls}" style="${style}">
       <div class="card-header">
         <div class="card-icon ${type}">${icon}</div>
         <div>
@@ -395,7 +480,7 @@ function renderCardsBreno() {
           </div>
         </div>
         <div class="card-metrics">
-          ${['Investimento','N° Leads','N° Potenciais','N° Potenciais Reais','N° Leads Aptas']
+          ${['Investimento','N° Leads','N° Potenciais','N° Potenciais Reais','N° Vendas Potenciais','N° Leads Aptas']
             .map(l => `<div class="metric-item"><div class="metric-label">${l}</div>${skVal}</div>`)
             .join('')}
         </div>
@@ -434,6 +519,7 @@ function renderCardsBreno() {
         { label: 'N° Leads', value: fmtNum(total.leads) },
         { label: 'N° Potenciais', value: fmtNum(total.potenciais) },
         { label: 'N° Potenciais Reais', value: fmtNum(total.potenciaisReais) },
+        { label: 'N° Vendas Potenciais', value: fmtNum(total.vendasCLT) },
         { label: 'N° Leads Aptas', value: fmtNum(total.leadsAptas) },
       ],
       wide: true,
@@ -452,6 +538,7 @@ function renderCardsBreno() {
           { label: 'N° Leads', value: fmtNum(d.sede.leads) },
           { label: 'N° Potenciais', value: fmtNum(d.sede.potenciais) },
           { label: 'N° Potenciais Reais', value: fmtNum(d.sede.potenciaisReais) },
+          { label: 'N° Vendas Potenciais', value: fmtNum(d.sede.vendasCLT) },
           { label: 'N° Leads Aptas', value: fmtNum(d.sede.leadsAptas) },
         ],
       });
@@ -467,6 +554,7 @@ function renderCardsBreno() {
           { label: 'N° Leads', value: fmtNum(d.filial.leads) },
           { label: 'N° Potenciais', value: fmtNum(d.filial.potenciais) },
           { label: 'N° Potenciais Reais', value: fmtNum(d.filial.potenciaisReais) },
+          { label: 'N° Vendas Potenciais', value: fmtNum(d.filial.vendasCLT) },
           { label: 'N° Leads Aptas', value: fmtNum(d.filial.leadsAptas) },
         ],
       });
@@ -769,6 +857,119 @@ document.getElementById('bBtnNextPage').addEventListener('click', () => {
   if (tableStateBreno.page < totalPages) { tableStateBreno.page++; renderTableBreno(); }
 });
 
+/* ===== PAINEL VENDAS — FILTROS VISÃO GERAL ===== */
+function setFiltroModoVendas(modo) {
+  stateVendas.filtroModo = modo;
+  const rP = document.getElementById('vPeriodGroup').closest('.filter-row');
+  const rD = document.getElementById('vBtnDataEspecifica').closest('.filter-row');
+  const rI = document.getElementById('vBtnIntervalo').closest('.filter-row');
+  rP.classList.toggle('filter-disabled', modo !== 'periodo');
+  rD.classList.toggle('filter-disabled', modo !== 'data');
+  rI.classList.toggle('filter-disabled', modo !== 'intervalo');
+  if (modo !== 'periodo') { document.querySelectorAll('#vPeriodGroup .btn-seg').forEach(b=>b.classList.remove('active')); stateVendas.periodo=null; }
+  if (modo !== 'data') { stateVendas.dataEspecifica=null; document.getElementById('vInputDataEspecifica').value=''; document.getElementById('vLabelDataEspecifica').textContent='Selecionar data específica'; }
+  if (modo !== 'intervalo') { stateVendas.intervalo={de:null,ate:null}; document.getElementById('vLabelIntervalo').textContent='Selecionar intervalo de datas'; document.getElementById('vIntervaloInputs').classList.add('hidden'); }
+}
+
+document.getElementById('vPeriodGroup').addEventListener('click', e => {
+  const btn = e.target.closest('.btn-seg');
+  if (!btn) return;
+  setFiltroModoVendas('periodo');
+  document.querySelectorAll('#vPeriodGroup .btn-seg').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  stateVendas.periodo = btn.dataset.val;
+  stateVendas.data = agregarVendas(filtrarPorDataVendas(rawRowsVendas));
+  renderCardsVendas();
+});
+
+document.getElementById('vBtnDataEspecifica').addEventListener('click', () => {
+  setFiltroModoVendas('data');
+  document.getElementById('vInputDataEspecifica').showPicker?.() || document.getElementById('vInputDataEspecifica').click();
+});
+document.getElementById('vInputDataEspecifica').addEventListener('change', e => {
+  stateVendas.dataEspecifica = e.target.value;
+  document.getElementById('vLabelDataEspecifica').textContent = new Date(e.target.value+'T12:00:00').toLocaleDateString('pt-BR');
+  stateVendas.data = agregarVendas(filtrarPorDataVendas(rawRowsVendas));
+  renderCardsVendas();
+});
+document.getElementById('vBtnIntervalo').addEventListener('click', () => {
+  setFiltroModoVendas('intervalo');
+  document.getElementById('vIntervaloInputs').classList.toggle('hidden');
+});
+document.getElementById('vBtnAplicarIntervalo').addEventListener('click', () => {
+  const de = document.getElementById('vInputDe').value, ate = document.getElementById('vInputAte').value;
+  if (!de || !ate) return;
+  stateVendas.intervalo = { de, ate };
+  document.getElementById('vLabelIntervalo').textContent = `${new Date(de+'T12:00:00').toLocaleDateString('pt-BR')} até ${new Date(ate+'T12:00:00').toLocaleDateString('pt-BR')}`;
+  document.getElementById('vIntervaloInputs').classList.add('hidden');
+  stateVendas.data = agregarVendas(filtrarPorDataVendas(rawRowsVendas));
+  renderCardsVendas();
+});
+document.getElementById('vRefreshBtn').addEventListener('click', doRefresh);
+
+/* ===== PAINEL VENDAS — FILTROS TABELA POR DIA ===== */
+document.getElementById('vTabPeriodGroup').addEventListener('click', e => {
+  const btn = e.target.closest('.btn-seg');
+  if (!btn) return;
+  setFiltroModoVendasTab('periodo');
+  document.querySelectorAll('#vTabPeriodGroup .btn-seg').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  stateVendasTab.periodo = btn.dataset.val;
+  renderTableVendas();
+});
+document.getElementById('vTabBtnData').addEventListener('click', () => {
+  setFiltroModoVendasTab('data');
+  document.getElementById('vTabInputData').showPicker?.() || document.getElementById('vTabInputData').click();
+});
+document.getElementById('vTabInputData').addEventListener('change', e => {
+  stateVendasTab.dataEspecifica = e.target.value;
+  document.getElementById('vTabLabelData').textContent = new Date(e.target.value+'T12:00:00').toLocaleDateString('pt-BR');
+  renderTableVendas();
+});
+document.getElementById('vTabBtnIntervalo').addEventListener('click', () => {
+  setFiltroModoVendasTab('intervalo');
+  document.getElementById('vTabIntervaloInputs').classList.toggle('hidden');
+});
+document.getElementById('vTabBtnAplicarIntervalo').addEventListener('click', () => {
+  const de = document.getElementById('vTabInputDe').value, ate = document.getElementById('vTabInputAte').value;
+  if (!de || !ate) return;
+  stateVendasTab.intervalo = { de, ate };
+  document.getElementById('vTabLabelIntervalo').textContent = `${new Date(de+'T12:00:00').toLocaleDateString('pt-BR')} até ${new Date(ate+'T12:00:00').toLocaleDateString('pt-BR')}`;
+  document.getElementById('vTabIntervaloInputs').classList.add('hidden');
+  renderTableVendas();
+});
+document.getElementById('vTabCanalGroup').addEventListener('click', e => {
+  const btn = e.target.closest('.btn-seg');
+  if (!btn) return;
+  document.querySelectorAll('#vTabCanalGroup .btn-seg').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  stateVendasTab.canal = btn.dataset.val;
+  tableStateVendas.page = 1;
+  renderTableVendas();
+});
+document.getElementById('vTabAptasGroup').addEventListener('click', e => {
+  const btn = e.target.closest('.btn-seg');
+  if (!btn) return;
+  document.querySelectorAll('#vTabAptasGroup .btn-seg').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  stateVendasTab.aptas = btn.dataset.val;
+  tableStateVendas.page = 1;
+  renderTableVendas();
+});
+
+document.getElementById('vPageSize').addEventListener('change', e => {
+  tableStateVendas.pageSize = parseInt(e.target.value);
+  tableStateVendas.page = 1;
+  renderTableVendas();
+});
+document.getElementById('vBtnPrevPage').addEventListener('click', () => {
+  if (tableStateVendas.page > 1) { tableStateVendas.page--; renderTableVendas(); }
+});
+document.getElementById('vBtnNextPage').addEventListener('click', () => {
+  const tp = Math.ceil(tableStateVendas.rows.length / tableStateVendas.pageSize);
+  if (tableStateVendas.page < tp) { tableStateVendas.page++; renderTableVendas(); }
+});
+
 /* ===== DARK MODE ===== */
 document.getElementById('darkToggle').addEventListener('click', () => {
   const isDark = document.body.classList.toggle('dark');
@@ -797,7 +998,7 @@ const sessao = {
 };
 
 // Nomes amigáveis dos painéis
-const NOMES_PAINEL = { eder: 'Painel Éder', breno: 'Painel Breno' };
+const NOMES_PAINEL = { eder: 'Painel Éder', breno: 'Painel Breno', vendas: 'Painel Vendas' };
 
 /* ===== PERMISSÕES (multi-painel) =====
    DEV → acesso total. Senão, o nível por painel decide:
@@ -841,6 +1042,7 @@ function aplicarSessao() {
   document.getElementById('perfilNome').textContent = nome;
   document.getElementById('perfilNivelLabel').textContent = resumoNivel();
   document.getElementById('greetingName').textContent = `Olá, ${nome}`;
+  document.getElementById('topbarVersao').textContent = VERSAO;
   renderAvatar();
   renderSeletoresAvatar();
 
@@ -849,6 +1051,11 @@ function aplicarSessao() {
     .classList.toggle('hidden', !temAcessoPainel('eder'));
   document.querySelector('.nav-group[data-group="breno"]')
     .classList.toggle('hidden', !temAcessoPainel('breno'));
+
+  // Painel Vendas: só DEV e Chefe
+  const temVendas = sessao.ehDev || Object.values(sessao.paineis).some(n => String(n).toLowerCase().includes('chefe'));
+  const navVendas = document.getElementById('navGroupVendas');
+  if (navVendas) navVendas.style.display = temVendas ? '' : 'none';
 
   // Relatório do Éder some para quem é Agente no Éder
   document.querySelector('.nav-item[data-page="importar"]')
@@ -1787,6 +1994,12 @@ const tableStateBreno = {
   pageSize: 50,
 };
 
+const tableStateVendas = {
+  rows: [],
+  page: 1,
+  pageSize: 50,
+};
+
 // Mock: gera 180 dias × 2 canais (substituir pelos dados do Sheets)
 function getMockDaily() {
   const rows = [];
@@ -1838,6 +2051,7 @@ function renderTable() {
       <td>${fmtNum(r.leads)}</td>
       <td>${fmtNum(r.potenciais)}</td>
       <td>${fmtNum(r.potenciaisReais)}</td>
+      <td>${fmtNum(r.vendasCLT)}</td>
       <td>${fmtNum(r.leadsAptas)}</td>
     </tr>`;
   }).join('');
@@ -1875,6 +2089,7 @@ function renderTableBreno() {
       <td>${fmtNum(r.leads)}</td>
       <td>${fmtNum(r.potenciais)}</td>
       <td>${fmtNum(r.potenciaisReais)}</td>
+      <td>${fmtNum(r.vendasCLT)}</td>
       <td>${fmtNum(r.leadsAptas)}</td>
     </tr>`;
   }).join('');
@@ -1912,6 +2127,147 @@ document.getElementById('btnNextPage').addEventListener('click', () => {
 
 tableState.rows = getMockDaily();
 renderTable();
+
+/* ===== PAINEL VENDAS — RENDER ===== */
+function vMetricas(m) {
+  return [
+    { label: 'Contratos',     value: fmtNum(m ? m.contratos    : 0) },
+    { label: 'Validadas',     value: fmtNum(m ? m.validadas    : 0) },
+    { label: 'Canceladas',    value: fmtNum(m ? m.canceladas   : 0) },
+    { label: 'Não Validadas', value: fmtNum(m ? m.naoValidadas : 0) },
+  ];
+}
+
+function renderCardsVendas() {
+  const container = document.getElementById('vCardsContainer');
+  if (!container) return;
+
+  const d = stateVendas.data;
+
+  if (stateVendas.carregando || !d) {
+    const skVal = '<span class="metric-value loading">––––</span>';
+    const skCard = (title, sub, wide) => `
+      <div class="metric-card${wide ? ' card-total' : ''}" style="margin-bottom:16px">
+        <div class="card-header"><div class="card-icon ${wide ? 'total' : ''}"></div>
+          <div><div class="card-title">${title}</div>${sub ? `<div class="card-subtitle">${sub}</div>` : ''}</div>
+        </div>
+        <div class="card-metrics">
+          ${['Contratos','Validadas','Canceladas','Não Validadas'].map(l =>
+            `<div class="metric-item"><div class="metric-label">${l}</div>${skVal}</div>`).join('')}
+        </div>
+      </div>`;
+    container.innerHTML =
+      skCard('Total Geral', 'Sede + Filial · sem Aptas', true) +
+      skCard('Aptas', 'Sede + Filial · somente Aptas', true) +
+      '<div class="cards-row">' + skCard('Sede','') + skCard('Sede Aptas','') + '</div>' +
+      '<div class="cards-row">' + skCard('Filial','') + skCard('Filial Aptas','') + '</div>';
+    return;
+  }
+
+  const iconTotal = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>';
+
+  let html = '';
+
+  // Geral sem Aptas
+  html += cardHTML({ type: 'total', icon: iconTotal, title: 'Total Geral', subtitle: 'Sede + Filial · sem Aptas', metrics: vMetricas(d.geral), wide: true });
+
+  // Aptas
+  html += cardHTML({ type: 'total', icon: iconTotal, title: 'Aptas', subtitle: 'Sede + Filial · somente Aptas', metrics: vMetricas(d.aptas), wide: true, extraClass: 'card-aptas' });
+
+  // Sede + Sede Aptas
+  html += '<div class="cards-row">';
+  html += cardHTML({ type: 'sede', icon: 'S', title: 'Sede', subtitle: 'Sem Aptas', metrics: vMetricas(d.sede) });
+  html += cardHTML({ type: 'sede', icon: 'S', title: 'Sede Aptas', subtitle: 'Somente Aptas', metrics: vMetricas(d.sedeAptas), extraClass: 'card-aptas' });
+  html += '</div>';
+
+  // Filial + Filial Aptas
+  html += '<div class="cards-row">';
+  html += cardHTML({ type: 'filial', icon: 'F', title: 'Filial', subtitle: 'Sem Aptas', metrics: vMetricas(d.filial) });
+  html += cardHTML({ type: 'filial', icon: 'F', title: 'Filial Aptas', subtitle: 'Somente Aptas', metrics: vMetricas(d.filialAptas), extraClass: 'card-aptas' });
+  html += '</div>';
+
+  container.innerHTML = html;
+}
+
+function filtrarTabelaVendas(rows) {
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const dia = d => { const x = new Date(d+'T00:00:00'); x.setHours(0,0,0,0); return x; };
+  const st = stateVendasTab;
+
+  if (st.filtroModo === 'data' && st.dataEspecifica)
+    rows = rows.filter(r => r.data === st.dataEspecifica);
+  else if (st.filtroModo === 'intervalo' && st.intervalo.de && st.intervalo.ate) {
+    const de = dia(st.intervalo.de), ate = dia(st.intervalo.ate);
+    rows = rows.filter(r => { const d = dia(r.data); return d >= de && d <= ate; });
+  } else {
+    const p = st.periodo || '30d';
+    if (p === 'hoje') rows = rows.filter(r => +dia(r.data) === +hoje);
+    else if (p === 'ontem') { const o = new Date(hoje); o.setDate(o.getDate()-1); rows = rows.filter(r => +dia(r.data) === +o); }
+    else { const dias = parseInt(p)||30; const ini = new Date(hoje); ini.setDate(ini.getDate()-(dias-1)); rows = rows.filter(r => { const d=dia(r.data); return d>=ini && d<=hoje; }); }
+  }
+
+  if (st.canal !== 'todos') rows = rows.filter(r => r.canal === st.canal);
+  if (st.aptas === 'sem') rows = rows.filter(r => !r.isApta);
+  if (st.aptas === 'so')  rows = rows.filter(r => r.isApta);
+  return rows;
+}
+
+function setFiltroModoVendasTab(modo) {
+  stateVendasTab.filtroModo = modo;
+  const rP = document.getElementById('vTabPeriodGroup').closest('.filter-row');
+  const rD = document.getElementById('vTabBtnData').closest('.filter-row');
+  const rI = document.getElementById('vTabBtnIntervalo').closest('.filter-row');
+  rP.classList.toggle('filter-disabled', modo !== 'periodo');
+  rD.classList.toggle('filter-disabled', modo !== 'data');
+  rI.classList.toggle('filter-disabled', modo !== 'intervalo');
+  if (modo !== 'periodo') { document.querySelectorAll('#vTabPeriodGroup .btn-seg').forEach(b=>b.classList.remove('active')); stateVendasTab.periodo=null; }
+  if (modo !== 'data') { stateVendasTab.dataEspecifica=null; document.getElementById('vTabInputData').value=''; document.getElementById('vTabLabelData').textContent='Selecionar data específica'; }
+  if (modo !== 'intervalo') { stateVendasTab.intervalo={de:null,ate:null}; document.getElementById('vTabLabelIntervalo').textContent='Selecionar intervalo de datas'; document.getElementById('vTabIntervaloInputs').classList.add('hidden'); }
+}
+
+function renderTableVendas() {
+  const tbody = document.getElementById('vTableBody');
+  if (!tbody) return;
+
+  const rows = filtrarTabelaVendas([...rawRowsVendas])
+    .sort((a, b) => b.data.localeCompare(a.data));
+
+  tableStateVendas.rows = rows;
+  const total = rows.length;
+  const totalPages = Math.max(1, Math.ceil(total / tableStateVendas.pageSize));
+  if (tableStateVendas.page > totalPages) tableStateVendas.page = totalPages;
+
+  const ini = (tableStateVendas.page - 1) * tableStateVendas.pageSize;
+  const fim = Math.min(ini + tableStateVendas.pageSize, total);
+  const pageRows = rows.slice(ini, fim);
+
+  const esc = s => String(s||'').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+
+  let ultimaData = null, alt = false;
+  tbody.innerHTML = pageRows.map(r => {
+    if (r.data !== ultimaData) { if (ultimaData !== null) alt = !alt; ultimaData = r.data; }
+    const statusLabel = r.status === 'VALIDADA' ? 'Validada' : r.status === 'CANCELADA' ? 'Cancelada' : 'Não Validada';
+    const statusClass = r.status === 'VALIDADA' ? 'badge-ok' : r.status === 'CANCELADA' ? 'badge-cancel' : 'badge-warn';
+    return `<tr class="${alt ? 'row-dia-alt' : ''}">
+      <td>${new Date(r.data+'T12:00:00').toLocaleDateString('pt-BR')}</td>
+      <td><span class="canal-badge ${r.canal}">${r.canal==='sede'?'Sede':'Filial'}</span></td>
+      <td class="td-tooltip" title="${esc(r.cliente)}">${esc(r.cliente)||'—'}</td>
+      <td class="td-tooltip td-obs" title="${esc(r.observacao)}">${esc(r.observacao)||'—'}</td>
+      <td>${esc(r.validadora)||'—'}</td>
+      <td><span class="status-badge ${statusClass}">${statusLabel}</span></td>
+      <td>${r.isApta?'<span class="badge chefe" style="font-size:10px">Apta</span>':''}</td>
+    </tr>`;
+  }).join('');
+
+  const countEl = document.getElementById('vTableCount');
+  if (countEl) countEl.textContent = total ? `Exibindo ${ini+1}–${fim} de ${fmtNum(total)} registros` : 'Nenhum registro';
+  const pageInfoEl = document.getElementById('vPageInfo');
+  if (pageInfoEl) pageInfoEl.textContent = `Página ${tableStateVendas.page} de ${totalPages}`;
+  const prevBtn = document.getElementById('vBtnPrevPage');
+  const nextBtn = document.getElementById('vBtnNextPage');
+  if (prevBtn) prevBtn.disabled = tableStateVendas.page <= 1;
+  if (nextBtn) nextBtn.disabled = tableStateVendas.page >= totalPages;
+}
 
 /* ===== INIT ===== */
 if (sessao.usuario) aplicarSessao();

@@ -363,6 +363,17 @@ body.sidebar-collapsed .main { margin-left: 0; }
 /* Marca o grupo que contém a página ativa */
 .nav-group.tem-ativo .nav-group-header { color: var(--text); }
 
+/* Faixa de fundo com fade nos títulos de painel da sidebar */
+.nav-group[data-group="eder"] .nav-group-header,
+.nav-group[data-group="breno"] .nav-group-header,
+.nav-group[data-group="vendas"] .nav-group-header {
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+}
+.nav-group[data-group="eder"] .nav-group-header  { background-image: linear-gradient(90deg, rgba(99,102,241,.18) 0%, transparent 100%); }
+.nav-group[data-group="breno"] .nav-group-header { background-image: linear-gradient(90deg, rgba(16,185,129,.18) 0%, transparent 100%); }
+.nav-group[data-group="vendas"] .nav-group-header { background-image: linear-gradient(90deg, rgba(245,158,11,.18) 0%, transparent 100%); }
+
 /* Lista de sub-itens — anima abrindo/fechando */
 .nav-group-items {
   overflow: hidden;
@@ -454,6 +465,16 @@ body.sidebar-collapsed .main { margin-left: 0; }
   color: var(--text-muted);
 }
 .topbar-actions { display: flex; align-items: center; gap: 8px; }
+.topbar-versao {
+  font-size: 10px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, #ec4899, #be185d);
+  padding: 2px 7px;
+  border-radius: 20px;
+  letter-spacing: .3px;
+  white-space: nowrap;
+}
 
 .topbar-greeting {
   display: flex;
@@ -575,6 +596,29 @@ body.sidebar-collapsed .main { margin-left: 0; }
 /* ===== PAGES ===== */
 .page { display: none; }
 .page.active { display: block; }
+
+/* Acento de painel — faixa no topo que rola junto com o conteúdo */
+.page.acento-eder::before,
+.page.acento-breno::before,
+.page.acento-vendas::before {
+  content: '';
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 180px;
+  pointer-events: none;
+  z-index: 0;
+}
+.page { position: relative; }
+.page.acento-eder::before    { background: linear-gradient(to bottom, rgba(99, 102, 241, .08), transparent); }
+.page.acento-breno::before   { background: linear-gradient(to bottom, rgba(16, 185, 129, .08), transparent); }
+.page.acento-vendas::before  { background: linear-gradient(to bottom, rgba(245, 158, 11, .08), transparent); }
+
+body.dark .page.acento-eder::before    { background: linear-gradient(to bottom, rgba(99, 102, 241, .13), transparent); }
+body.dark .page.acento-breno::before   { background: linear-gradient(to bottom, rgba(16, 185, 129, .13), transparent); }
+body.dark .page.acento-vendas::before  { background: linear-gradient(to bottom, rgba(245, 158, 11, .13), transparent); }
 
 .page-header { margin-bottom: 24px; }
 .page-header h1 { font-size: 28px; font-weight: 700; margin-bottom: 4px; }
@@ -733,6 +777,15 @@ body.sidebar-collapsed .main { margin-left: 0; }
   transition: box-shadow .2s;
 }
 .metric-card:hover { box-shadow: var(--shadow-md); }
+.metric-card.card-aptas {
+  background: linear-gradient(135deg, rgba(245,158,11,.10) 0%, rgba(251,191,36,.05) 100%);
+  border-color: rgba(245,158,11,.35);
+  border-left: 3px solid #f59e0b;
+}
+body.dark .metric-card.card-aptas {
+  background: linear-gradient(135deg, rgba(245,158,11,.14) 0%, rgba(251,191,36,.06) 100%);
+  border-color: rgba(245,158,11,.30);
+}
 
 .card-header {
   display: flex;
@@ -870,6 +923,30 @@ body.sidebar-collapsed .main { margin-left: 0; }
 .canal-badge.filial { background: rgba(34,197,94,.12);  color: #16a34a; }
 body.dark .canal-badge.sede   { color: #60a5fa; }
 body.dark .canal-badge.filial { color: #4ade80; }
+
+/* Filtros compactos da tabela Vendas por dia */
+.vtab-filtros { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.vtab-filtro-linha { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.vtab-label { font-size: 12px; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
+.btn-date-sm { font-size: 12px; padding: 5px 10px; }
+
+/* Coluna com tooltip nativo + truncamento */
+.td-tooltip { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: default; }
+.td-obs { max-width: 240px; }
+
+.status-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.status-badge.badge-ok     { background: rgba(34,197,94,.12);  color: #16a34a; }
+.status-badge.badge-cancel { background: rgba(239,68,68,.12);  color: #dc2626; }
+.status-badge.badge-warn   { background: rgba(245,158,11,.12); color: #d97706; }
+body.dark .status-badge.badge-ok     { color: #4ade80; }
+body.dark .status-badge.badge-cancel { color: #f87171; }
+body.dark .status-badge.badge-warn   { color: #fbbf24; }
 
 .table-pagination {
   display: flex;

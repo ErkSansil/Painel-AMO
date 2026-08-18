@@ -37,7 +37,7 @@ const ABA_CREDENCIAIS = 'CREDENCIAIS PAINEL';
 const MINUTOS_PARA_OFFLINE = 2;
 
 // Painéis e níveis reconhecidos pelo sistema
-const PAINEIS_VALIDOS = ['eder', 'breno'];
+const PAINEIS_VALIDOS = ['eder', 'breno', 'vendas'];
 const NIVEIS_VALIDOS = ['Chefe', 'Administrador', 'Consultor', 'Agente'];
 
 /** "eder=Administrador;breno=Agente" → { eder:'Administrador', breno:'Agente' } */
@@ -166,6 +166,7 @@ function mapearColuna(h) {
   if (n.includes('aptas')) return 'leadsAptas';
   if (n.includes('potenciaisclt') || (n.includes('potenciais') && n.includes('clt'))) return 'potenciaisCLT';
   if (n.includes('potenciaisreais') || (n.includes('potenciais') && n.includes('reais'))) return 'potenciaisReais';
+  if (n.includes('vendas')) return 'vendasCLT';
   if (n.includes('qualificadas')) return 'qualificadas';
   if (n.includes('investimento')) return 'investimento';
   if (n.includes('leads')) return 'leads';
@@ -203,7 +204,7 @@ function lerDiario(nomeAba) {
 
   const rows = [];
   for (let i = 1; i < values.length; i++) {
-    const row = { semana: '', data: null, leads: 0, potenciaisCLT: 0, potenciaisReais: 0, leadsAptas: 0, qualificadas: 0, investimento: 0 };
+    const row = { semana: '', data: null, leads: 0, potenciaisCLT: 0, potenciaisReais: 0, leadsAptas: 0, qualificadas: 0, vendasCLT: 0, investimento: 0 };
     let temData = false;
 
     for (let j = 0; j < cols.length; j++) {
@@ -223,6 +224,56 @@ function lerDiario(nomeAba) {
   return rows;
 }
 
+/** Lê a aba VENDAS E VALIDAÇÃO e devolve linhas individuais normalizadas.
+ *  Sede: A=data, B=A/F, D=status | Filial: G=data, H=A/F, J=status */
+function lerVendas() {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('VENDAS E VALIDAÇÃO');
+  if (!sh) return [];
+  const values = sh.getDataRange().getValues();
+  if (values.length < 3) return [];
+
+  function normStatus(v) {
+    const s = String(v).trim().toUpperCase()
+      .normalize('NFD').replace(/[̀-ͯ]/g, '');
+    if (s === 'VALIDADA') return 'VALIDADA';
+    if (s === 'CANCELADA') return 'CANCELADA';
+    if (s.includes('NAO VALIDADA') || s.includes('NÃO VALIDADA') || s === 'NAO VALIDADA') return 'NAO_VALIDADA';
+    return '';
+  }
+
+  const rows = [];
+  for (let i = 2; i < values.length; i++) {
+    const r = values[i];
+
+    // SEDE: A(0)=data, B(1)=A/F, C(2)=cliente, D(3)=status, E(4)=observacao, F(5)=validadora
+    const dataSede = paraDataISO(r[0]);
+    if (dataSede) {
+      const af = String(r[1]).trim();
+      const status = normStatus(r[3]);
+      if (status) rows.push({
+        data: dataSede, canal: 'sede', isApta: af === 'Apta FUTURA', status: status,
+        cliente: String(r[2] || '').trim(),
+        observacao: String(r[4] || '').trim(),
+        validadora: String(r[5] || '').trim(),
+      });
+    }
+
+    // FILIAL: G(6)=data, H(7)=A/F, I(8)=cliente, J(9)=status, K(10)=observacao, L(11)=validadora
+    const dataFilial = paraDataISO(r[6]);
+    if (dataFilial) {
+      const af = String(r[7]).trim();
+      const status = normStatus(r[9]);
+      if (status) rows.push({
+        data: dataFilial, canal: 'filial', isApta: af === 'Apta FUTURA', status: status,
+        cliente: String(r[8] || '').trim(),
+        observacao: String(r[10] || '').trim(),
+        validadora: String(r[11] || '').trim(),
+      });
+    }
+  }
+  return rows;
+}
+
 function getDados() {
   const sede = lerDiario(ABA_SEDE);
   const filial = lerDiario(ABA_FILIAL);
@@ -233,12 +284,16 @@ function getDados() {
   try { brenoFilial = lerDiario(ABA_BRENO_FILIAL); } catch(e) {}
   const alteracoesBreno = detectarAlteracoes('breno', brenoSede, brenoFilial);
 
+  let vendas = [];
+  try { vendas = lerVendas(); } catch(e) {}
+
   return {
     ok: true,
     sede: sede,
     filial: filial,
     brenoSede: brenoSede,
     brenoFilial: brenoFilial,
+    vendas: vendas,
     ultimaAttLeads: alteracoes.leads,
     ultimaAttInvestimento: alteracoes.investimento,
     brenoAttLeads: alteracoesBreno.leads,
