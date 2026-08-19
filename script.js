@@ -98,12 +98,12 @@ const stateVendas = {
 
 // Estado separado para os filtros da tabela "por dia" de Vendas
 const stateVendasTab = {
-  filtroModo: 'periodo',
-  periodo: '30d',
-  dataEspecifica: null,
-  intervalo: { de: null, ate: null },
-  canal: 'todos',   // todos | sede | filial
-  aptas: 'todas',   // todas | sem | so
+  buscaCliente: '',
+  buscaValidadora: '',
+  aptas: true,         // true = inclui aptas
+  validadas: true,
+  naoValidadas: true,
+  canceladas: true,
 };
 
 async function fetchData() {
@@ -908,53 +908,20 @@ document.getElementById('vBtnAplicarIntervalo').addEventListener('click', () => 
 document.getElementById('vRefreshBtn').addEventListener('click', doRefresh);
 
 /* ===== PAINEL VENDAS — FILTROS TABELA POR DIA ===== */
-document.getElementById('vTabPeriodGroup').addEventListener('click', e => {
-  const btn = e.target.closest('.btn-seg');
-  if (!btn) return;
-  setFiltroModoVendasTab('periodo');
-  document.querySelectorAll('#vTabPeriodGroup .btn-seg').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');
-  stateVendasTab.periodo = btn.dataset.val;
-  renderTableVendas();
+['vTabBuscaCliente','vTabBuscaValidadora'].forEach(id => {
+  document.getElementById(id).addEventListener('input', e => {
+    stateVendasTab[id === 'vTabBuscaCliente' ? 'buscaCliente' : 'buscaValidadora'] = e.target.value.trim().toLowerCase();
+    tableStateVendas.page = 1;
+    renderTableVendas();
+  });
 });
-document.getElementById('vTabBtnData').addEventListener('click', () => {
-  setFiltroModoVendasTab('data');
-  document.getElementById('vTabInputData').showPicker?.() || document.getElementById('vTabInputData').click();
-});
-document.getElementById('vTabInputData').addEventListener('change', e => {
-  stateVendasTab.dataEspecifica = e.target.value;
-  document.getElementById('vTabLabelData').textContent = new Date(e.target.value+'T12:00:00').toLocaleDateString('pt-BR');
-  renderTableVendas();
-});
-document.getElementById('vTabBtnIntervalo').addEventListener('click', () => {
-  setFiltroModoVendasTab('intervalo');
-  document.getElementById('vTabIntervaloInputs').classList.toggle('hidden');
-});
-document.getElementById('vTabBtnAplicarIntervalo').addEventListener('click', () => {
-  const de = document.getElementById('vTabInputDe').value, ate = document.getElementById('vTabInputAte').value;
-  if (!de || !ate) return;
-  stateVendasTab.intervalo = { de, ate };
-  document.getElementById('vTabLabelIntervalo').textContent = `${new Date(de+'T12:00:00').toLocaleDateString('pt-BR')} até ${new Date(ate+'T12:00:00').toLocaleDateString('pt-BR')}`;
-  document.getElementById('vTabIntervaloInputs').classList.add('hidden');
-  renderTableVendas();
-});
-document.getElementById('vTabCanalGroup').addEventListener('click', e => {
-  const btn = e.target.closest('.btn-seg');
-  if (!btn) return;
-  document.querySelectorAll('#vTabCanalGroup .btn-seg').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');
-  stateVendasTab.canal = btn.dataset.val;
-  tableStateVendas.page = 1;
-  renderTableVendas();
-});
-document.getElementById('vTabAptasGroup').addEventListener('click', e => {
-  const btn = e.target.closest('.btn-seg');
-  if (!btn) return;
-  document.querySelectorAll('#vTabAptasGroup .btn-seg').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');
-  stateVendasTab.aptas = btn.dataset.val;
-  tableStateVendas.page = 1;
-  renderTableVendas();
+['vTabChkAptas','vTabChkValidadas','vTabChkNaoValidadas','vTabChkCanceladas'].forEach(id => {
+  document.getElementById(id).addEventListener('change', e => {
+    const map = { vTabChkAptas:'aptas', vTabChkValidadas:'validadas', vTabChkNaoValidadas:'naoValidadas', vTabChkCanceladas:'canceladas' };
+    stateVendasTab[map[id]] = e.target.checked;
+    tableStateVendas.page = 1;
+    renderTableVendas();
+  });
 });
 
 document.getElementById('vPageSize').addEventListener('change', e => {
@@ -2190,39 +2157,14 @@ function renderCardsVendas() {
 }
 
 function filtrarTabelaVendas(rows) {
-  const hoje = new Date(); hoje.setHours(0,0,0,0);
-  const dia = d => { const x = new Date(d+'T00:00:00'); x.setHours(0,0,0,0); return x; };
   const st = stateVendasTab;
-
-  if (st.filtroModo === 'data' && st.dataEspecifica)
-    rows = rows.filter(r => r.data === st.dataEspecifica);
-  else if (st.filtroModo === 'intervalo' && st.intervalo.de && st.intervalo.ate) {
-    const de = dia(st.intervalo.de), ate = dia(st.intervalo.ate);
-    rows = rows.filter(r => { const d = dia(r.data); return d >= de && d <= ate; });
-  } else {
-    const p = st.periodo || '30d';
-    if (p === 'hoje') rows = rows.filter(r => +dia(r.data) === +hoje);
-    else if (p === 'ontem') { const o = new Date(hoje); o.setDate(o.getDate()-1); rows = rows.filter(r => +dia(r.data) === +o); }
-    else { const dias = parseInt(p)||30; const ini = new Date(hoje); ini.setDate(ini.getDate()-(dias-1)); rows = rows.filter(r => { const d=dia(r.data); return d>=ini && d<=hoje; }); }
-  }
-
-  if (st.canal !== 'todos') rows = rows.filter(r => r.canal === st.canal);
-  if (st.aptas === 'sem') rows = rows.filter(r => !r.isApta);
-  if (st.aptas === 'so')  rows = rows.filter(r => r.isApta);
+  if (!st.aptas)       rows = rows.filter(r => !r.isApta);
+  if (!st.validadas)   rows = rows.filter(r => r.status !== 'VALIDADA');
+  if (!st.naoValidadas) rows = rows.filter(r => r.status !== 'NAO_VALIDADA');
+  if (!st.canceladas)  rows = rows.filter(r => r.status !== 'CANCELADA');
+  if (st.buscaCliente)    rows = rows.filter(r => (r.cliente||'').toLowerCase().includes(st.buscaCliente));
+  if (st.buscaValidadora) rows = rows.filter(r => (r.validadora||'').toLowerCase().includes(st.buscaValidadora));
   return rows;
-}
-
-function setFiltroModoVendasTab(modo) {
-  stateVendasTab.filtroModo = modo;
-  const rP = document.getElementById('vTabPeriodGroup').closest('.filter-row');
-  const rD = document.getElementById('vTabBtnData').closest('.filter-row');
-  const rI = document.getElementById('vTabBtnIntervalo').closest('.filter-row');
-  rP.classList.toggle('filter-disabled', modo !== 'periodo');
-  rD.classList.toggle('filter-disabled', modo !== 'data');
-  rI.classList.toggle('filter-disabled', modo !== 'intervalo');
-  if (modo !== 'periodo') { document.querySelectorAll('#vTabPeriodGroup .btn-seg').forEach(b=>b.classList.remove('active')); stateVendasTab.periodo=null; }
-  if (modo !== 'data') { stateVendasTab.dataEspecifica=null; document.getElementById('vTabInputData').value=''; document.getElementById('vTabLabelData').textContent='Selecionar data específica'; }
-  if (modo !== 'intervalo') { stateVendasTab.intervalo={de:null,ate:null}; document.getElementById('vTabLabelIntervalo').textContent='Selecionar intervalo de datas'; document.getElementById('vTabIntervaloInputs').classList.add('hidden'); }
 }
 
 function renderTableVendas() {
