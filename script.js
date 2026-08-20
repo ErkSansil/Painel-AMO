@@ -23,7 +23,7 @@
 const SHEETS_API_URL = 'https://script.google.com/macros/s/AKfycbzCbNRSL9vyBpYI3rjNxz8a5cybZfh5t9e-vzc2dq9ZplbEw2bQT6L1i8gqykFLv5f_UA/exec';
 
 /* ===== VERSÃO ===== */
-const VERSAO = 'Beta 2.0';
+const VERSAO = 'Beta 2.2';
 
 /* ===== STATE ===== */
 const state = {
