@@ -12,15 +12,19 @@
  * 5. Clique em "Implantar" e copie a URL gerada (termina em /exec)
  * 6. Cole essa URL no script.js do painel, na constante SHEETS_API_URL
  *
- * AÇÕES:
- *   ?action=dados                          → linhas diárias de SEDE e FILIAL
- *   ?action=login&usuario=&senha=          → valida login, marca Online
- *   ?action=ping&usuario=                  → heartbeat (mantém Online)
- *   ?action=logout&usuario=                → marca Offline
+ * AÇÕES (POST, mas doGet aceita os mesmos parâmetros por compatibilidade):
+ *   ?action=dados&usuario=&token=          → linhas diárias de SEDE e FILIAL
+ *   ?action=login&usuario=&senha=          → valida login, marca Online, devolve um token de sessão
+ *   ?action=ping&usuario=&token=           → heartbeat (mantém Online)
+ *   ?action=logout&usuario=&token=         → marca Offline, invalida o token
+ *   ?action=minhasenha&usuario=&token=     → devolve a senha real do próprio usuário (Perfil)
  *   ?action=criarlogin&...&paineis=eder=Administrador;breno=Agente&dev=
  *   ?action=editarusuario&...&paineis=&dev=
  *   ?action=excluirusuario&...&usuario=
- *   ?action=listarusuarios / situacao
+ *   ?action=listarusuarios / situacao      → usam admUsuario+admToken em vez de admSenha
+ *
+ * SESSÃO: login() devolve um token opaco (não a senha) que o front-end guarda e
+ * reenvia em toda chamada autenticada. A senha real nunca fica salva no navegador.
  *
  * PERMISSÕES (multi-painel):
  *   - Coluna PAINEIS guarda "eder=Administrador;breno=Agente" (nível por painel)
@@ -35,6 +39,7 @@ const ABA_BRENO_SEDE = 'BRENO SEDE';
 const ABA_BRENO_FILIAL = 'BRENO FILIAL';
 const ABA_CREDENCIAIS = 'CREDENCIAIS PAINEL';
 const MINUTOS_PARA_OFFLINE = 2;
+const TOKEN_DIAS_VALIDADE = 90;
 
 // Painéis e níveis reconhecidos pelo sistema
 const PAINEIS_VALIDOS = ['eder', 'breno', 'vendas'];
@@ -98,42 +103,58 @@ function ehGestor(acesso) {
   });
 }
 
+/** true se o acesso já contém nível Chefe em algum painel (Chefe = superusuário, ver resolverAcesso) */
+function ehChefe(acesso) {
+  return Object.keys(acesso.paineis).some(p => normHeader(acesso.paineis[p]).includes('chefe'));
+}
+
+/** Painéis onde o gestor tem poder de gerenciar usuários. DEV/Chefe gerenciam todos. */
+function paineisGeridos(acesso) {
+  if (acesso.ehDev) return PAINEIS_VALIDOS.slice();
+  return Object.keys(acesso.paineis).filter(p => {
+    const n = normHeader(acesso.paineis[p]);
+    return n.includes('chefe') || n.includes('adm');
+  });
+}
+
 function doGet(e) {
   const action = (e.parameter.action || 'dados').toLowerCase();
   let result;
 
   try {
     if (action === 'dados') {
-      // Exige credenciais válidas para ver os dados
-      const auth = validarCredencial(e.parameter.usuario, e.parameter.senha);
-      result = auth.ok ? getDados() : { ok: false, erro: 'Não autorizado' };
+      // Exige um token de sessão válido para ver os dados
+      const ok = validarToken(e.parameter.usuario, e.parameter.token);
+      result = ok ? getDados() : { ok: false, erro: 'Não autorizado' };
     } else if (action === 'login') {
       result = login(e.parameter.usuario, e.parameter.senha);
     } else if (action === 'ping') {
-      result = ping(e.parameter.usuario);
+      result = ping(e.parameter.usuario, e.parameter.token);
     } else if (action === 'logout') {
-      result = logout(e.parameter.usuario);
+      result = logout(e.parameter.usuario, e.parameter.token);
+    } else if (action === 'minhasenha') {
+      result = minhaSenha(e.parameter.usuario, e.parameter.token);
     } else if (action === 'criarlogin') {
       result = criarLogin(
-        e.parameter.admUsuario, e.parameter.admSenha,
+        e.parameter.admUsuario, e.parameter.admToken,
         e.parameter.novoUsuario, e.parameter.novaSenha,
         e.parameter.paineis, e.parameter.dev
       );
     } else if (action === 'listarusuarios') {
-      result = listarUsuarios(e.parameter.admUsuario, e.parameter.admSenha);
+      result = listarUsuarios(e.parameter.admUsuario, e.parameter.admToken);
     } else if (action === 'editarusuario') {
       result = editarUsuario(
-        e.parameter.admUsuario, e.parameter.admSenha,
+        e.parameter.admUsuario, e.parameter.admToken,
         e.parameter.usuario, e.parameter.novaSenha,
         e.parameter.paineis, e.parameter.dev
       );
     } else if (action === 'excluirusuario') {
       result = excluirUsuario(
-        e.parameter.admUsuario, e.parameter.admSenha, e.parameter.usuario
+        e.parameter.admUsuario, e.parameter.admToken, e.parameter.usuario
       );
     } else if (action === 'situacao') {
       result = mudarSituacao(
-        e.parameter.admUsuario, e.parameter.admSenha,
+        e.parameter.admUsuario, e.parameter.admToken,
         e.parameter.usuario, e.parameter.situacao
       );
     } else {
@@ -146,6 +167,52 @@ function doGet(e) {
   return ContentService
     .createTextOutput(JSON.stringify(result))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+/** POST usa os mesmos parâmetros que GET (Apps Script preenche e.parameter do corpo
+ *  form-urlencoded também) — usado para não mandar usuário/senha/token na URL. */
+function doPost(e) {
+  return doGet(e);
+}
+
+/* ================= TOKEN DE SESSÃO =================
+ * Substitui a senha nas chamadas do dia a dia: o front-end guarda esse token
+ * (não a senha) e ele pode ser revogado a qualquer momento sem trocar a senha real. */
+
+/** Gera e guarda um token novo para o usuário; não invalida tokens de outros dispositivos. */
+function gerarToken(usuario) {
+  const token = Utilities.getUuid();
+  const expira = new Date(Date.now() + TOKEN_DIAS_VALIDADE * 24 * 60 * 60 * 1000).toISOString();
+  PropertiesService.getScriptProperties().setProperty(
+    'tok_' + token,
+    JSON.stringify({ usuario: String(usuario).trim().toLowerCase(), expira: expira })
+  );
+  return token;
+}
+
+/** true se o token existe, pertence a esse usuário e não expirou */
+function validarToken(usuario, token) {
+  if (!usuario || !token) return false;
+  const chave = 'tok_' + token;
+  const props = PropertiesService.getScriptProperties();
+  const bruto = props.getProperty(chave);
+  if (!bruto) return false;
+
+  try {
+    const dados = JSON.parse(bruto);
+    if (dados.usuario !== String(usuario).trim().toLowerCase()) return false;
+    if (new Date(dados.expira) < new Date()) {
+      props.deleteProperty(chave);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
+function invalidarToken(token) {
+  if (token) PropertiesService.getScriptProperties().deleteProperty('tok_' + token);
 }
 
 /* ================= DADOS DIÁRIOS ================= */
@@ -373,23 +440,31 @@ function colunasCred(sh) {
   return idx;
 }
 
-/** Valida que quem chama pode gerenciar usuários (DEV, ou Chefe/Adm em algum painel).
- *  Usa autenticação "silenciosa" (não marca Online) para não poluir o status. */
-function autenticarGestor(admUsuario, admSenha) {
-  if (!admUsuario || !admSenha) return { ok: false, erro: 'Credenciais inválidas' };
+/** Valida que quem chama pode gerenciar usuários (DEV, ou Chefe/Adm em algum painel). */
+function autenticarGestor(admUsuario, admToken) {
+  if (!validarToken(admUsuario, admToken)) return { ok: false, erro: 'Sessão inválida' };
   const sh = abaCred();
   const idx = colunasCred(sh);
   const linha = linhaDoUsuario(sh, idx, admUsuario);
   if (!linha) return { ok: false, erro: 'Credenciais inválidas' };
 
-  const senhaPlanilha = String(sh.getRange(linha, idx.senha).getValue()).trim();
-  if (senhaPlanilha !== String(admSenha).trim()) return { ok: false, erro: 'Credenciais inválidas' };
+  // Suspenso não pode gerenciar usuários mesmo com um token ainda válido
+  if (idx.situacao) {
+    const sit = normHeader(sh.getRange(linha, idx.situacao).getValue());
+    if (sit.includes('suspens')) return { ok: false, erro: 'Usuário suspenso' };
+  }
 
   const acesso = resolverAcesso(sh, idx, linha);
   if (!ehGestor(acesso)) {
     return { ok: false, erro: 'Seu nível de acesso não permite gerenciar usuários' };
   }
-  return { ok: true, ehDev: acesso.ehDev, paineis: acesso.paineis };
+  return {
+    ok: true,
+    ehDev: acesso.ehDev,
+    paineis: acesso.paineis,
+    geridos: paineisGeridos(acesso),
+    podeConcederChefe: acesso.ehDev || ehChefe(acesso),
+  };
 }
 
 /** Encontra a linha (número) de um usuário; 0 se não achar */
@@ -431,26 +506,6 @@ function atualizarStatusOffline(sh, idx) {
   }
 }
 
-/** Confere usuário/senha sem efeitos colaterais (não mexe em status/acesso).
- *  Usada para proteger a leitura dos dados. */
-function validarCredencial(usuario, senha) {
-  if (!usuario || !senha) return { ok: false };
-
-  const sh = abaCred();
-  const idx = colunasCred(sh);
-  const linha = linhaDoUsuario(sh, idx, usuario);
-  if (!linha) return { ok: false };
-
-  const senhaPlanilha = String(sh.getRange(linha, idx.senha).getValue()).trim();
-  if (senhaPlanilha !== String(senha).trim()) return { ok: false };
-
-  if (idx.situacao) {
-    const sit = normHeader(sh.getRange(linha, idx.situacao).getValue());
-    if (sit.includes('suspens')) return { ok: false };
-  }
-  return { ok: true };
-}
-
 function login(usuario, senha) {
   if (!usuario || !senha) return { ok: false, erro: 'Informe usuário e senha' };
 
@@ -478,17 +533,19 @@ function login(usuario, senha) {
   atualizarStatusOffline(sh, idx);
 
   const acesso = resolverAcesso(sh, idx, linha);
+  const usuarioReal = String(sh.getRange(linha, idx.usuario).getValue()).trim();
   return {
     ok: true,
-    usuario: String(sh.getRange(linha, idx.usuario).getValue()).trim(),
+    usuario: usuarioReal,
     ehDev: acesso.ehDev,
     paineis: acesso.paineis,
+    token: gerarToken(usuarioReal),
   };
 }
 
 /** Heartbeat: o painel chama a cada minuto enquanto aberto */
-function ping(usuario) {
-  if (!usuario) return { ok: false, erro: 'Informe o usuário' };
+function ping(usuario, token) {
+  if (!validarToken(usuario, token)) return { ok: false, erro: 'Sessão inválida' };
   const sh = abaCred();
   const idx = colunasCred(sh);
   const linha = linhaDoUsuario(sh, idx, usuario);
@@ -500,8 +557,9 @@ function ping(usuario) {
   return { ok: true };
 }
 
-function logout(usuario) {
+function logout(usuario, token) {
   if (!usuario) return { ok: false, erro: 'Informe o usuário' };
+  invalidarToken(token);
   const sh = abaCred();
   const idx = colunasCred(sh);
   const linha = linhaDoUsuario(sh, idx, usuario);
@@ -509,8 +567,18 @@ function logout(usuario) {
   return { ok: true };
 }
 
-function criarLogin(admUsuario, admSenha, novoUsuario, novaSenha, paineisStr, dev) {
-  const auth = autenticarGestor(admUsuario, admSenha);
+/** Devolve a senha real do próprio usuário autenticado (usada pelo olhinho no Perfil) */
+function minhaSenha(usuario, token) {
+  if (!validarToken(usuario, token)) return { ok: false, erro: 'Sessão inválida' };
+  const sh = abaCred();
+  const idx = colunasCred(sh);
+  const linha = linhaDoUsuario(sh, idx, usuario);
+  if (!linha) return { ok: false, erro: 'Usuário não encontrado' };
+  return { ok: true, senha: String(sh.getRange(linha, idx.senha).getValue()).trim() };
+}
+
+function criarLogin(admUsuario, admToken, novoUsuario, novaSenha, paineisStr, dev) {
+  const auth = autenticarGestor(admUsuario, admToken);
   if (!auth.ok) return auth;
   if (!novoUsuario || !novaSenha) return { ok: false, erro: 'Informe o novo usuário e senha' };
 
@@ -522,6 +590,16 @@ function criarLogin(admUsuario, admSenha, novoUsuario, novaSenha, paineisStr, de
   const paineis = parsePaineis(paineisStr);
   if (!querDev && Object.keys(paineis).length === 0) {
     return { ok: false, erro: 'Selecione ao menos um painel para o usuário' };
+  }
+
+  if (!querDev) {
+    const foraDoEscopo = Object.keys(paineis).find(p => auth.geridos.indexOf(p) === -1);
+    if (foraDoEscopo) return { ok: false, erro: 'Você não gerencia o painel "' + foraDoEscopo + '"' };
+
+    const querChefe = Object.keys(paineis).some(p => normHeader(paineis[p]).includes('chefe'));
+    if (querChefe && !auth.podeConcederChefe) {
+      return { ok: false, erro: 'Apenas Chefe ou DEV pode conceder nível Chefe' };
+    }
   }
 
   const sh = abaCred();
@@ -542,8 +620,8 @@ function criarLogin(admUsuario, admSenha, novoUsuario, novaSenha, paineisStr, de
 /* ================= GERENCIAMENTO DE USUÁRIOS ================= */
 
 /** Lista todos os usuários (sem expor as senhas) */
-function listarUsuarios(admUsuario, admSenha) {
-  const auth = autenticarGestor(admUsuario, admSenha);
+function listarUsuarios(admUsuario, admToken) {
+  const auth = autenticarGestor(admUsuario, admToken);
   if (!auth.ok) return auth;
 
   const sh = abaCred();
@@ -551,6 +629,7 @@ function listarUsuarios(admUsuario, admSenha) {
   const lastRow = sh.getLastRow();
   if (lastRow < 2) return { ok: true, usuarios: [] };
 
+  const verTudo = auth.ehDev || auth.podeConcederChefe;
   const get = (row, col) => col ? String(row[col - 1] || '').trim() : '';
   const usuarios = [];
 
@@ -559,6 +638,10 @@ function listarUsuarios(admUsuario, admSenha) {
     if (!get(row, idx.usuario)) continue;
 
     const acesso = resolverAcesso(sh, idx, linha);
+
+    // Administrador só enxerga usuários com quem compartilha ao menos um painel
+    if (!verTudo && !Object.keys(acesso.paineis).some(p => auth.geridos.indexOf(p) !== -1)) continue;
+
     usuarios.push({
       usuario: get(row, idx.usuario),
       ehDev: acesso.ehDev,
@@ -575,8 +658,8 @@ function listarUsuarios(admUsuario, admSenha) {
 }
 
 /** Edita senha e/ou painéis (níveis) e/ou flag DEV de um usuário */
-function editarUsuario(admUsuario, admSenha, usuario, novaSenha, paineisStr, dev) {
-  const auth = autenticarGestor(admUsuario, admSenha);
+function editarUsuario(admUsuario, admToken, usuario, novaSenha, paineisStr, dev) {
+  const auth = autenticarGestor(admUsuario, admToken);
   if (!auth.ok) return auth;
 
   const sh = abaCred();
@@ -584,11 +667,21 @@ function editarUsuario(admUsuario, admSenha, usuario, novaSenha, paineisStr, dev
   const linha = linhaDoUsuario(sh, idx, usuario);
   if (!linha) return { ok: false, erro: 'Usuário não encontrado' };
 
-  // Mexer em conta DEV (ou tornar alguém DEV) exige ser DEV
   const alvo = resolverAcesso(sh, idx, linha);
   const querDev = String(dev) === '1' || normHeader(dev) === 'true';
+
+  // Mexer em conta DEV (ou tornar alguém DEV) exige ser DEV
   if ((alvo.ehDev || querDev) && !auth.ehDev) {
     return { ok: false, erro: 'Apenas DEV pode alterar uma conta DEV' };
+  }
+  // Mexer em conta Chefe exige ser Chefe ou DEV (Chefe = acesso quase total, ver resolverAcesso)
+  if (ehChefe(alvo) && !auth.ehDev && !auth.podeConcederChefe) {
+    return { ok: false, erro: 'Apenas Chefe ou DEV pode alterar uma conta Chefe' };
+  }
+  // Ninguém (exceto DEV) pode alterar o próprio nível de acesso — evita autopromoção
+  const ehAutoedicao = String(usuario).trim().toLowerCase() === String(admUsuario).trim().toLowerCase();
+  if (ehAutoedicao && !auth.ehDev && (querDev || paineisStr !== undefined)) {
+    return { ok: false, erro: 'Você não pode alterar seu próprio nível de acesso' };
   }
 
   if (novaSenha && idx.senha) {
@@ -597,20 +690,40 @@ function editarUsuario(admUsuario, admSenha, usuario, novaSenha, paineisStr, dev
 
   // paineis só é atualizado se veio no pedido (string não-undefined)
   if (paineisStr !== undefined && paineisStr !== null) {
-    const paineis = parsePaineis(paineisStr);
-    if (!querDev && Object.keys(paineis).length === 0) {
+    const paineisPedidos = parsePaineis(paineisStr);
+
+    if (!querDev) {
+      const foraDoEscopo = Object.keys(paineisPedidos).find(p => auth.geridos.indexOf(p) === -1);
+      if (foraDoEscopo) return { ok: false, erro: 'Você não gerencia o painel "' + foraDoEscopo + '"' };
+
+      const querChefe = Object.keys(paineisPedidos).some(p => normHeader(paineisPedidos[p]).includes('chefe'));
+      if (querChefe && !auth.podeConcederChefe) {
+        return { ok: false, erro: 'Apenas Chefe ou DEV pode conceder nível Chefe' };
+      }
+    }
+
+    // Um gestor escopado só pode alterar os painéis que ele mesmo administra;
+    // o acesso do usuário nos demais painéis é preservado.
+    let paineisFinal = {};
+    if (!querDev) {
+      paineisFinal = Object.assign({}, alvo.paineis);
+      auth.geridos.forEach(p => delete paineisFinal[p]);
+      Object.assign(paineisFinal, paineisPedidos);
+    }
+
+    if (!querDev && Object.keys(paineisFinal).length === 0) {
       return { ok: false, erro: 'O usuário precisa de ao menos um painel' };
     }
     if (idx.nivel) sh.getRange(linha, idx.nivel).setValue(querDev ? 'DEV' : 'Padrão');
-    if (idx.paineis) sh.getRange(linha, idx.paineis).setValue(querDev ? '' : serializaPaineis(paineis));
+    if (idx.paineis) sh.getRange(linha, idx.paineis).setValue(querDev ? '' : serializaPaineis(paineisFinal));
   }
 
   return { ok: true, mensagem: 'Usuário atualizado com sucesso' };
 }
 
 /** Exclui um usuário (apaga a linha). Não pode excluir a si mesmo. */
-function excluirUsuario(admUsuario, admSenha, usuario) {
-  const auth = autenticarGestor(admUsuario, admSenha);
+function excluirUsuario(admUsuario, admToken, usuario) {
+  const auth = autenticarGestor(admUsuario, admToken);
   if (!auth.ok) return auth;
 
   if (String(usuario).trim().toLowerCase() === String(admUsuario).trim().toLowerCase()) {
@@ -627,14 +740,23 @@ function excluirUsuario(admUsuario, admSenha, usuario) {
   if (alvo.ehDev && !auth.ehDev) {
     return { ok: false, erro: 'Apenas DEV pode excluir uma conta DEV' };
   }
+  // Só Chefe ou DEV pode excluir uma conta Chefe
+  if (ehChefe(alvo) && !auth.ehDev && !auth.podeConcederChefe) {
+    return { ok: false, erro: 'Apenas Chefe ou DEV pode excluir uma conta Chefe' };
+  }
+  // Administrador só exclui usuários com quem compartilha ao menos um painel
+  if (!auth.ehDev && !auth.podeConcederChefe) {
+    const temPainelComum = Object.keys(alvo.paineis).some(p => auth.geridos.indexOf(p) !== -1);
+    if (!temPainelComum) return { ok: false, erro: 'Você não gerencia nenhum painel desse usuário' };
+  }
 
   sh.deleteRow(linha);
   return { ok: true, mensagem: 'Usuário excluído' };
 }
 
 /** Ativa ou suspende um usuário */
-function mudarSituacao(admUsuario, admSenha, usuario, situacao) {
-  const auth = autenticarGestor(admUsuario, admSenha);
+function mudarSituacao(admUsuario, admToken, usuario, situacao) {
+  const auth = autenticarGestor(admUsuario, admToken);
   if (!auth.ok) return auth;
 
   // Ninguém pode suspender a si mesmo
@@ -651,6 +773,15 @@ function mudarSituacao(admUsuario, admSenha, usuario, situacao) {
   const alvo = resolverAcesso(sh, idx, linha);
   if (alvo.ehDev && !auth.ehDev) {
     return { ok: false, erro: 'Apenas DEV pode alterar uma conta DEV' };
+  }
+  // Só Chefe ou DEV pode suspender/reativar uma conta Chefe
+  if (ehChefe(alvo) && !auth.ehDev && !auth.podeConcederChefe) {
+    return { ok: false, erro: 'Apenas Chefe ou DEV pode alterar uma conta Chefe' };
+  }
+  // Administrador só altera usuários com quem compartilha ao menos um painel
+  if (!auth.ehDev && !auth.podeConcederChefe) {
+    const temPainelComum = Object.keys(alvo.paineis).some(p => auth.geridos.indexOf(p) !== -1);
+    if (!temPainelComum) return { ok: false, erro: 'Você não gerencia nenhum painel desse usuário' };
   }
 
   const nova = normHeader(situacao).includes('suspens') ? 'Suspenso' : 'Ativo';

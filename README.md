@@ -121,21 +121,26 @@ Coluna PAINEIS (formato): `eder=Administrador;breno=Agente`
 
 ### A API (Apps Script)
 
-Todas as ações são `GET` na URL `/exec` com o parâmetro `action`:
+Todas as ações são `POST` (form-urlencoded) na URL `/exec` com o parâmetro `action` — `doPost` e `doGet` aceitam os mesmos parâmetros, mas o front-end usa POST para não expor usuário/senha/token na URL:
 
 | Ação | Parâmetros | O que faz |
 |---|---|---|
-| `dados` | `usuario`, `senha` | Retorna linhas diárias dos 4 canais + timestamps de alteração por painel. Exige credencial válida. |
-| `login` | `usuario`, `senha` | Valida login, marca Online, retorna `{ ehDev, paineis }`. |
-| `ping` | `usuario` | Heartbeat — mantém status Online. |
-| `logout` | `usuario` | Marca Offline. |
-| `criarlogin` | `admUsuario`, `admSenha`, `novoUsuario`, `novaSenha`, `paineis`, `dev` | Cria credencial. Só Chefe/Administrador. |
-| `listarusuarios` | `admUsuario`, `admSenha` | Lista usuários sem expor senhas. |
-| `editarusuario` | `admUsuario`, `admSenha`, `usuario`, `novaSenha?`, `paineis?`, `dev?` | Edita senha e/ou painéis. |
-| `excluirusuario` | `admUsuario`, `admSenha`, `usuario` | Remove a linha da planilha. |
-| `situacao` | `admUsuario`, `admSenha`, `usuario`, `situacao` | Ativa ou suspende. |
+| `login` | `usuario`, `senha` | Valida login, marca Online, retorna `{ ehDev, paineis, token }`. É a única ação que usa a senha real — todas as demais usam o `token` devolvido aqui. |
+| `dados` | `usuario`, `token` | Retorna linhas diárias dos 4 canais + timestamps de alteração por painel. Exige token válido. |
+| `ping` | `usuario`, `token` | Heartbeat — mantém status Online. |
+| `logout` | `usuario`, `token` | Marca Offline e invalida o token. |
+| `minhasenha` | `usuario`, `token` | Devolve a senha real do próprio usuário (usada pelo olhinho no Perfil). |
+| `criarlogin` | `admUsuario`, `admToken`, `novoUsuario`, `novaSenha`, `paineis`, `dev` | Cria credencial. Só Chefe/Administrador, restrito aos painéis que o solicitante administra (ver Escopo abaixo). |
+| `listarusuarios` | `admUsuario`, `admToken` | Lista usuários sem expor senhas; Administrador só vê usuários com quem compartilha algum painel. |
+| `editarusuario` | `admUsuario`, `admToken`, `usuario`, `novaSenha?`, `paineis?`, `dev?` | Edita senha e/ou painéis, só dentro do escopo do solicitante. |
+| `excluirusuario` | `admUsuario`, `admToken`, `usuario` | Remove a linha da planilha. |
+| `situacao` | `admUsuario`, `admToken`, `usuario`, `situacao` | Ativa ou suspende. |
 
 Respostas sempre em JSON: `{ ok: true, ... }` ou `{ ok: false, erro: "mensagem" }`.
+
+**Sessão por token**: `login()` gera um token opaco (`Utilities.getUuid()`) válido por 90 dias, guardado em `PropertiesService` (`tok_<token> → { usuario, expira }`). O front-end guarda só esse token — nunca a senha real — e reenvia em toda chamada autenticada. `logout` apaga o token usado; múltiplos dispositivos podem ter tokens válidos simultaneamente.
+
+**Escopo de gestão por painel**: `autenticarGestor` calcula `geridos` (painéis onde o solicitante é Chefe/Administrador) e `podeConcederChefe` (só Chefe ou DEV). `criarlogin`/`editarusuario` rejeitam painéis fora do escopo do solicitante e o nível Chefe só pode ser concedido por quem já é Chefe/DEV. Ninguém (exceto DEV) pode alterar o próprio nível de acesso. Contas Chefe só podem ser editadas/excluídas/suspensas por outra conta Chefe ou DEV — mesma regra que já existia para DEV.
 
 **Detecção de mudanças**: a cada chamada de `dados`, o script calcula hashes de leads e investimento separadamente para Éder e Breno, e compara com os anteriores (guardados em `PropertiesService` com prefixo `eder_` / `breno_`). Hash diferente = registra o horário da mudança.
 
@@ -144,7 +149,7 @@ Respostas sempre em JSON: `{ ok: true, ... }` ou `{ ok: false, erro: "mensagem" 
 - **Estado global por painel**: `state` (Éder) e `stateBreno` com filtros, canal e dados independentes.
 - **`fetchData()`**: única chamada que retorna dados dos dois painéis de uma vez. Alimenta `rawRows` e `rawRowsBreno`.
 - **`doRefresh(silencioso)`**: quando `silencioso = true` (auto-refresh), não exibe skeleton — atualiza os números sem piscar. Quando `false` (manual ou mudança de filtro), exibe skeleton durante o carregamento.
-- **Sessão**: `sessaoUsuario`, `sessaoSenha`, `sessaoEhDev`, `sessaoPaineis` no `localStorage` ou `sessionStorage`.
+- **Sessão**: `sessaoUsuario`, `sessaoToken`, `sessaoEhDev`, `sessaoPaineis` no `localStorage` ou `sessionStorage`. A senha real nunca é salva — quando o Perfil precisa exibi-la (olhinho), busca sob demanda via `action=minhasenha`.
 - **Permissões no front**: ocultam elementos visualmente — a validação real é no Apps Script em toda ação sensível.
 - **Relatórios**: gerados no navegador com [SheetJS](https://sheetjs.com/) (Excel) e [jsPDF](https://github.com/parallax/jsPDF) + autoTable (PDF), via CDN.
 
@@ -160,8 +165,9 @@ Respostas sempre em JSON: `{ ok: true, ... }` ou `{ ok: false, erro: "mensagem" 
 
 ### Notas de segurança
 
-- A planilha continua privada — o código público não dá acesso direto a ela.
-- A API de dados exige credencial válida; sem login, responde "Não autorizado".
+- A planilha continua privada — o código público não dá acesso direto a ela. As senhas ficam em texto puro na aba CREDENCIAIS PAINEL: mantenha o compartilhamento da planilha restrito só a quem precisa, e considere proteger essa aba especificamente (Dados → Planilhas e intervalos protegidos).
+- A API de dados exige token de sessão válido; sem login, responde "Não autorizado".
 - Não há limite de tentativas de login: **use senhas fortes** nas contas DEV e Chefe.
-- A senha da sessão fica no navegador com "Lembrar de mim" — evite em computadores compartilhados.
-- DEV só pode ser criado/editado por outro DEV — a proteção é validada no Apps Script.
+- O navegador guarda um **token de sessão** (não a senha) com "Lembrar de mim" — ainda assim, evite em computadores compartilhados, já que o token dá acesso enquanto for válido (90 dias) ou até um logout explícito.
+- DEV só pode ser criado/editado por outro DEV, e Chefe só por Chefe/DEV — a proteção é validada no Apps Script.
+- Administrador só gerencia usuários nos painéis onde ele próprio é Administrador/Chefe, e não pode conceder nível Chefe nem alterar o próprio nível de acesso.

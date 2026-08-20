@@ -117,14 +117,14 @@ async function fetchData() {
     const params = new URLSearchParams({
       action: 'dados',
       usuario: sessao.usuario,
-      senha: sessao.senha,
+      token: sessao.token,
     });
-    const res = await fetch(`${SHEETS_API_URL}?${params}`);
+    const res = await fetch(SHEETS_API_URL, { method: 'POST', body: params });
     const json = await res.json();
     if (!json.ok) {
       // Credencial inválida ou suspensa no meio da sessão? Volta pro login.
       if (json.erro === 'Não autorizado') {
-        ['sessaoUsuario', 'sessaoSenha', 'sessaoNivel'].forEach(k => {
+        ['sessaoUsuario', 'sessaoToken', 'sessaoNivel'].forEach(k => {
           localStorage.removeItem(k);
           sessionStorage.removeItem(k);
         });
@@ -333,6 +333,10 @@ function fmtBRL(v) {
 }
 function fmtNum(v) {
   return Math.round(v).toLocaleString('pt-BR');
+}
+/** Escapa texto antes de injetar em innerHTML (evita XSS a partir de dados da planilha) */
+function escHtml(s) {
+  return String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 /* ===== RENDER CARDS ===== */
@@ -956,7 +960,7 @@ const lerSessao = chave =>
 
 const sessao = {
   usuario: lerSessao('sessaoUsuario'),
-  senha: lerSessao('sessaoSenha'),
+  token: lerSessao('sessaoToken'),
   ehDev: lerSessao('sessaoEhDev') === '1',
   paineis: (() => {
     try { return JSON.parse(lerSessao('sessaoPaineis') || '{}'); }
@@ -966,6 +970,9 @@ const sessao = {
 
 // Nomes amigáveis dos painéis
 const NOMES_PAINEL = { eder: 'Painel Éder', breno: 'Painel Breno', vendas: 'Painel Vendas' };
+
+// Senha real do próprio usuário: buscada sob demanda (olhinho do Perfil), nunca fica salva no navegador
+let senhaRevelada = null;
 
 /* ===== PERMISSÕES (multi-painel) =====
    DEV → acesso total. Senão, o nível por painel decide:
@@ -1004,7 +1011,8 @@ function aplicarSessao() {
   const nome = primeiroNome.charAt(0).toUpperCase() + primeiroNome.slice(1);
 
   document.getElementById('perfilUsuario').value = sessao.usuario;
-  document.getElementById('perfilSenha').value = sessao.senha;
+  senhaRevelada = null;
+  document.getElementById('perfilSenha').value = '••••••••';
   document.getElementById('perfilNivel').value = sessao.ehDev ? 'DEV' : 'Padrão';
   document.getElementById('perfilNome').textContent = nome;
   document.getElementById('perfilNivelLabel').textContent = resumoNivel();
@@ -1079,18 +1087,18 @@ document.getElementById('loginForm').addEventListener('submit', async e => {
 
   try {
     const params = new URLSearchParams({ action: 'login', usuario, senha });
-    const res = await fetch(`${SHEETS_API_URL}?${params}`);
+    const res = await fetch(SHEETS_API_URL, { method: 'POST', body: params });
     const json = await res.json();
 
     if (json.ok) {
       sessao.usuario = json.usuario;
-      sessao.senha = senha;
+      sessao.token = json.token;
       sessao.ehDev = !!json.ehDev;
       sessao.paineis = json.paineis || {};
       const lembrar = document.getElementById('loginLembrar').checked;
       const storage = lembrar ? localStorage : sessionStorage;
       storage.setItem('sessaoUsuario', sessao.usuario);
-      storage.setItem('sessaoSenha', sessao.senha);
+      storage.setItem('sessaoToken', sessao.token);
       storage.setItem('sessaoEhDev', sessao.ehDev ? '1' : '0');
       storage.setItem('sessaoPaineis', JSON.stringify(sessao.paineis));
       aplicarSessao();
@@ -1111,12 +1119,27 @@ document.getElementById('loginForm').addEventListener('submit', async e => {
 });
 
 // Delegação: funciona para qualquer olhinho, inclusive os criados dinamicamente
-document.addEventListener('click', e => {
+document.addEventListener('click', async e => {
   const btn = e.target.closest('.btn-eye');
   if (!btn) return;
   const input = document.getElementById(btn.dataset.target);
   if (!input) return;
   const mostrar = input.type === 'password';
+
+  // Campo "minha senha" do Perfil: a senha real não fica salva no navegador,
+  // então é buscada do servidor só na primeira vez que o usuário clica pra revelar.
+  if (mostrar && btn.dataset.target === 'perfilSenha' && senhaRevelada === null) {
+    btn.disabled = true;
+    try {
+      const params = new URLSearchParams({ action: 'minhasenha', usuario: sessao.usuario, token: sessao.token });
+      const res = await fetch(SHEETS_API_URL, { method: 'POST', body: params });
+      const json = await res.json();
+      senhaRevelada = json.ok ? json.senha : '';
+    } catch { senhaRevelada = ''; }
+    input.value = senhaRevelada;
+    btn.disabled = false;
+  }
+
   input.type = mostrar ? 'text' : 'password';
   btn.querySelector('.eye-open').classList.toggle('hidden', mostrar);
   btn.querySelector('.eye-closed').classList.toggle('hidden', !mostrar);
@@ -1205,12 +1228,12 @@ function gerFeedback(msg, ok) {
 }
 
 async function apiGestor(params) {
-  const qs = new URLSearchParams({
+  const body = new URLSearchParams({
     admUsuario: sessao.usuario,
-    admSenha: sessao.senha,
+    admToken: sessao.token,
     ...params,
   });
-  const res = await fetch(`${SHEETS_API_URL}?${qs}`);
+  const res = await fetch(SHEETS_API_URL, { method: 'POST', body });
   return res.json();
 }
 
@@ -1263,10 +1286,10 @@ function renderUsuarios(usuarios) {
     const ehProprio = u.usuario.toLowerCase() === sessao.usuario.toLowerCase();
 
     return `
-    <div class="usuario-row" data-usuario="${u.usuario}">
-      <div class="usuario-avatar" style="background:${corAvatar(u.usuario)}">${u.usuario.charAt(0).toUpperCase()}</div>
+    <div class="usuario-row" data-usuario="${escHtml(u.usuario)}">
+      <div class="usuario-avatar" style="background:${corAvatar(u.usuario)}">${escHtml(u.usuario.charAt(0).toUpperCase())}</div>
       <div class="usuario-info">
-        <div class="usuario-nome">${u.usuario}${ehProprio ? ' (você)' : ''}</div>
+        <div class="usuario-nome">${escHtml(u.usuario)}${ehProprio ? ' (você)' : ''}</div>
         <div class="usuario-meta">
           ${u.criado ? 'Criado: ' + u.criado : ''}${u.ultimoAcesso ? ' • Último acesso: ' + u.ultimoAcesso : ''}
         </div>
@@ -1406,9 +1429,10 @@ document.getElementById('btnRecarregarUsuarios').addEventListener('click', carre
 /* ===== SAIR ===== */
 document.getElementById('btnSair').addEventListener('click', () => {
   if (SHEETS_API_URL && sessao.usuario) {
-    fetch(`${SHEETS_API_URL}?action=logout&usuario=${encodeURIComponent(sessao.usuario)}`).catch(() => {});
+    const body = new URLSearchParams({ action: 'logout', usuario: sessao.usuario, token: sessao.token });
+    fetch(SHEETS_API_URL, { method: 'POST', body }).catch(() => {});
   }
-  ['sessaoUsuario', 'sessaoSenha', 'sessaoEhDev', 'sessaoPaineis'].forEach(k => {
+  ['sessaoUsuario', 'sessaoToken', 'sessaoEhDev', 'sessaoPaineis'].forEach(k => {
     localStorage.removeItem(k);
     sessionStorage.removeItem(k);
   });
@@ -1577,8 +1601,8 @@ renderLogs();
    Quem ficar 2 min sem sinal é marcado Offline pelo Apps Script. */
 function enviarPing() {
   if (!SHEETS_API_URL || !sessao.usuario) return;
-  fetch(`${SHEETS_API_URL}?action=ping&usuario=${encodeURIComponent(sessao.usuario)}`)
-    .catch(() => {});
+  const body = new URLSearchParams({ action: 'ping', usuario: sessao.usuario, token: sessao.token });
+  fetch(SHEETS_API_URL, { method: 'POST', body }).catch(() => {});
 }
 enviarPing();
 setInterval(enviarPing, 60000);
