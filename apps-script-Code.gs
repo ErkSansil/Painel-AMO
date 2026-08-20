@@ -291,34 +291,72 @@ function lerDiario(nomeAba) {
   return rows;
 }
 
-/** Lê a aba VENDAS E VALIDAÇÃO e devolve linhas individuais normalizadas.
- *  Sede: A=data, B=A/F, D=status | Filial: G=data, H=A/F, J=status */
+/** true se a coluna A/F marca o registro como Apta (contém "Apta", ex: "Apta FUTURA") */
+function ehApta(v) {
+  return normHeader(v).includes('apta');
+}
+
+/** Normaliza o status de validação de uma linha; '' se não for um dos três reconhecidos */
+function normStatusVenda(v) {
+  const n = normHeader(v);
+  if (n === 'validada') return 'VALIDADA';
+  if (n === 'cancelada') return 'CANCELADA';
+  if (n === 'naovalidada') return 'NAO_VALIDADA';
+  return '';
+}
+
+/** Lê a aba VENDAS E VALIDAÇÃO. Dois blocos independentes, ambos com cabeçalho na
+ *  linha 2 e dados a partir da linha 3 (linha 1 só tem os títulos mesclados SEDE/FILIAL):
+ *  - diario: contratos por dia já agregados pela planilha (colunas N:R, identificadas
+ *    pelo cabeçalho: DATA / VENDAS SEDE / SEDE APTAS / VENDAS FILIAL / FILIAL APTAS).
+ *    É a fonte do card "Contratos" — conta TUDO daquele dia, independente de status.
+ *  - linhas: um registro por contrato (blocos SEDE=A:F e FILIAL=G:L). É a fonte de
+ *    Validadas/Canceladas/Não Validadas — só entram linhas com um desses três status;
+ *    "CONSULTAR" (ou qualquer outro) fica de fora daqui, mas ainda conta normalmente
+ *    no bloco "diario" acima. */
 function lerVendas() {
   const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('VENDAS E VALIDAÇÃO');
-  if (!sh) return [];
+  if (!sh) return { diario: [], linhas: [] };
   const values = sh.getDataRange().getValues();
-  if (values.length < 3) return [];
+  if (values.length < 3) return { diario: [], linhas: [] };
 
-  function normStatus(v) {
-    const s = String(v).trim().toUpperCase()
-      .normalize('NFD').replace(/[̀-ͯ]/g, '');
-    if (s === 'VALIDADA') return 'VALIDADA';
-    if (s === 'CANCELADA') return 'CANCELADA';
-    if (s.includes('NAO VALIDADA') || s.includes('NÃO VALIDADA') || s === 'NAO VALIDADA') return 'NAO_VALIDADA';
-    return '';
+  // --- Bloco "diario": contratos por dia (colunas mapeadas pelo cabeçalho da linha 2) ---
+  const idxDiario = {};
+  values[1].forEach((h, i) => {
+    const n = normHeader(h);
+    if (n.includes('data')) idxDiario.data = i;
+    else if (n.includes('vendas') && n.includes('sede')) idxDiario.sede = i;
+    else if (n.includes('sede') && n.includes('apta')) idxDiario.sedeAptas = i;
+    else if (n.includes('vendas') && n.includes('filial')) idxDiario.filial = i;
+    else if (n.includes('filial') && n.includes('apta')) idxDiario.filialAptas = i;
+  });
+
+  const diario = [];
+  if (idxDiario.data !== undefined) {
+    for (let i = 2; i < values.length; i++) {
+      const data = paraDataISO(values[i][idxDiario.data]);
+      if (!data) continue;
+      diario.push({
+        data: data,
+        sede: paraNumero(values[i][idxDiario.sede]),
+        sedeAptas: paraNumero(values[i][idxDiario.sedeAptas]),
+        filial: paraNumero(values[i][idxDiario.filial]),
+        filialAptas: paraNumero(values[i][idxDiario.filialAptas]),
+      });
+    }
   }
 
-  const rows = [];
+  // --- Bloco "linhas": um registro por contrato (dados a partir da linha 3) ---
+  const linhas = [];
   for (let i = 2; i < values.length; i++) {
     const r = values[i];
 
     // SEDE: A(0)=data, B(1)=A/F, C(2)=cliente, D(3)=status, E(4)=observacao, F(5)=validadora
     const dataSede = paraDataISO(r[0]);
     if (dataSede) {
-      const af = String(r[1]).trim();
-      const status = normStatus(r[3]);
-      if (status) rows.push({
-        data: dataSede, canal: 'sede', isApta: af === 'Apta FUTURA', status: status,
+      const status = normStatusVenda(r[3]);
+      if (status) linhas.push({
+        data: dataSede, canal: 'sede', isApta: ehApta(r[1]), status: status,
         cliente: String(r[2] || '').trim(),
         observacao: String(r[4] || '').trim(),
         validadora: String(r[5] || '').trim(),
@@ -328,17 +366,16 @@ function lerVendas() {
     // FILIAL: G(6)=data, H(7)=A/F, I(8)=cliente, J(9)=status, K(10)=observacao, L(11)=validadora
     const dataFilial = paraDataISO(r[6]);
     if (dataFilial) {
-      const af = String(r[7]).trim();
-      const status = normStatus(r[9]);
-      if (status) rows.push({
-        data: dataFilial, canal: 'filial', isApta: af === 'Apta FUTURA', status: status,
+      const status = normStatusVenda(r[9]);
+      if (status) linhas.push({
+        data: dataFilial, canal: 'filial', isApta: ehApta(r[7]), status: status,
         cliente: String(r[8] || '').trim(),
         observacao: String(r[10] || '').trim(),
         validadora: String(r[11] || '').trim(),
       });
     }
   }
-  return rows;
+  return { diario: diario, linhas: linhas };
 }
 
 function getDados() {
@@ -351,7 +388,7 @@ function getDados() {
   try { brenoFilial = lerDiario(ABA_BRENO_FILIAL); } catch(e) {}
   const alteracoesBreno = detectarAlteracoes('breno', brenoSede, brenoFilial);
 
-  let vendas = [];
+  let vendas = { diario: [], linhas: [] };
   try { vendas = lerVendas(); } catch(e) {}
 
   return {

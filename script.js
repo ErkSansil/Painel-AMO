@@ -75,7 +75,8 @@ function calcTotal(d) {
 // Linhas diárias cruas vindas da planilha (uma por dia, por canal)
 let rawRows = { sede: [], filial: [] };
 let rawRowsBreno = { sede: [], filial: [] };
-let rawRowsVendas = [];
+let rawRowsVendas = [];    // um registro por contrato (Validada/Cancelada/Não Validada)
+let rawDiarioVendas = [];  // contratos por dia já agregados na planilha (fonte do card "Contratos")
 
 const stateBreno = {
   filtroModo: 'periodo',
@@ -146,8 +147,9 @@ async function fetchData() {
     };
     atualizarTabelaDiariaBreno();
 
-    rawRowsVendas = json.vendas || [];
-    stateVendas.data = agregarVendas(filtrarPorDataVendas(rawRowsVendas));
+    rawRowsVendas = (json.vendas && json.vendas.linhas) || [];
+    rawDiarioVendas = (json.vendas && json.vendas.diario) || [];
+    stateVendas.data = agregarVendas(filtrarPorDataVendas(rawRowsVendas), filtrarPorDataVendas(rawDiarioVendas));
     atualizarTabelaDiariaVendas();
     renderCardsVendas();
 
@@ -248,24 +250,40 @@ function filtrarPorDataVendas(rows) {
   return rows.filter(r => { const d = dia(r.data); return d >= inicio && d <= hoje; });
 }
 
-function agregarVendas(rows) {
-  function contar(arr) {
+/** Soma o bloco diário (contratos por dia já agregados na planilha) já filtrado por período */
+function somarDiarioVendas(diario) {
+  return diario.reduce((acc, r) => {
+    acc.sede += r.sede; acc.sedeAptas += r.sedeAptas;
+    acc.filial += r.filial; acc.filialAptas += r.filialAptas;
+    return acc;
+  }, { sede: 0, sedeAptas: 0, filial: 0, filialAptas: 0 });
+}
+
+/** linhas = registros individuais de validação (já filtrados por período);
+ *  diario = contratos por dia já agregados na planilha (já filtrado por período).
+ *  "Contratos" vem do diario (conta tudo, independente de status);
+ *  Validadas/Canceladas/Não Validadas vêm das linhas (só as 3 com status reconhecido). */
+function agregarVendas(linhas, diario) {
+  function contarStatus(arr) {
     return {
-      contratos: arr.length,
       validadas: arr.filter(r => r.status === 'VALIDADA').length,
       canceladas: arr.filter(r => r.status === 'CANCELADA').length,
       naoValidadas: arr.filter(r => r.status === 'NAO_VALIDADA').length,
     };
   }
-  const semAptas = rows.filter(r => !r.isApta);
-  const aptas    = rows.filter(r => r.isApta);
+  const linhasSemAptas = linhas.filter(r => !r.isApta);
+  const linhasAptas    = linhas.filter(r => r.isApta);
+  const soma = somarDiarioVendas(diario);
+
+  const grupo = (contratos, arr) => Object.assign({ contratos: contratos }, contarStatus(arr));
+
   return {
-    geral:       contar(semAptas),
-    aptas:       contar(aptas),
-    sede:        contar(semAptas.filter(r => r.canal === 'sede')),
-    filial:      contar(semAptas.filter(r => r.canal === 'filial')),
-    sedeAptas:   contar(aptas.filter(r => r.canal === 'sede')),
-    filialAptas: contar(aptas.filter(r => r.canal === 'filial')),
+    geral:       grupo(soma.sede + soma.filial, linhasSemAptas),
+    aptas:       grupo(soma.sedeAptas + soma.filialAptas, linhasAptas),
+    sede:        grupo(soma.sede, linhasSemAptas.filter(r => r.canal === 'sede')),
+    filial:      grupo(soma.filial, linhasSemAptas.filter(r => r.canal === 'filial')),
+    sedeAptas:   grupo(soma.sedeAptas, linhasAptas.filter(r => r.canal === 'sede')),
+    filialAptas: grupo(soma.filialAptas, linhasAptas.filter(r => r.canal === 'filial')),
   };
 }
 
@@ -882,7 +900,7 @@ document.getElementById('vPeriodGroup').addEventListener('click', e => {
   document.querySelectorAll('#vPeriodGroup .btn-seg').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   stateVendas.periodo = btn.dataset.val;
-  stateVendas.data = agregarVendas(filtrarPorDataVendas(rawRowsVendas));
+  stateVendas.data = agregarVendas(filtrarPorDataVendas(rawRowsVendas), filtrarPorDataVendas(rawDiarioVendas));
   renderCardsVendas();
 });
 
@@ -893,7 +911,7 @@ document.getElementById('vBtnDataEspecifica').addEventListener('click', () => {
 document.getElementById('vInputDataEspecifica').addEventListener('change', e => {
   stateVendas.dataEspecifica = e.target.value;
   document.getElementById('vLabelDataEspecifica').textContent = new Date(e.target.value+'T12:00:00').toLocaleDateString('pt-BR');
-  stateVendas.data = agregarVendas(filtrarPorDataVendas(rawRowsVendas));
+  stateVendas.data = agregarVendas(filtrarPorDataVendas(rawRowsVendas), filtrarPorDataVendas(rawDiarioVendas));
   renderCardsVendas();
 });
 document.getElementById('vBtnIntervalo').addEventListener('click', () => {
@@ -906,7 +924,7 @@ document.getElementById('vBtnAplicarIntervalo').addEventListener('click', () => 
   stateVendas.intervalo = { de, ate };
   document.getElementById('vLabelIntervalo').textContent = `${new Date(de+'T12:00:00').toLocaleDateString('pt-BR')} até ${new Date(ate+'T12:00:00').toLocaleDateString('pt-BR')}`;
   document.getElementById('vIntervaloInputs').classList.add('hidden');
-  stateVendas.data = agregarVendas(filtrarPorDataVendas(rawRowsVendas));
+  stateVendas.data = agregarVendas(filtrarPorDataVendas(rawRowsVendas), filtrarPorDataVendas(rawDiarioVendas));
   renderCardsVendas();
 });
 document.getElementById('vRefreshBtn').addEventListener('click', doRefresh);
