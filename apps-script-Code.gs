@@ -305,24 +305,35 @@ function normStatusVenda(v) {
   return '';
 }
 
-/** Lê a aba VENDAS E VALIDAÇÃO. Dois blocos independentes, ambos com cabeçalho na
- *  linha 2 e dados a partir da linha 3 (linha 1 só tem os títulos mesclados SEDE/FILIAL):
- *  - diario: contratos por dia já agregados pela planilha (colunas N:R, identificadas
- *    pelo cabeçalho: DATA / VENDAS SEDE / SEDE APTAS / VENDAS FILIAL / FILIAL APTAS).
+/** Lê a aba VENDAS E VALIDAÇÃO. Dois blocos independentes, com cabeçalhos em linhas
+ *  diferentes (a planilha não é uniforme entre os dois):
+ *  - diario: contratos por dia já agregados pela planilha (colunas N:R). Cabeçalho fica
+ *    na LINHA 1 (DATA / VENDAS SEDE / SEDE APTAS / VENDAS FILIAL / FILIAL APTAS) e os
+ *    dados já começam na linha 2 — não tem título mesclado nem linha extra como o resto.
  *    É a fonte do card "Contratos" — conta TUDO daquele dia, independente de status.
- *  - linhas: um registro por contrato (blocos SEDE=A:F e FILIAL=G:L). É a fonte de
- *    Validadas/Canceladas/Não Validadas — só entram linhas com um desses três status;
- *    "CONSULTAR" (ou qualquer outro) fica de fora daqui, mas ainda conta normalmente
- *    no bloco "diario" acima. */
+ *  - linhas: um registro por contrato (blocos SEDE=A:F e FILIAL=G:L). Linha 1 só tem os
+ *    títulos mesclados SEDE/FILIAL, cabeçalho de coluna de verdade fica na LINHA 2, dados
+ *    a partir da linha 3. É a fonte de Validadas/Canceladas/Não Validadas — só entram
+ *    linhas com um desses três status; "CONSULTAR" (ou qualquer outro) fica de fora daqui,
+ *    mas ainda conta normalmente no bloco "diario" acima. */
+// Painel nunca mostra mais que 90 dias corridos; 120 dá folga sem carregar
+// milhares de contratos antigos que o front vai descartar de qualquer jeito.
+const VENDAS_DIAS_RETIDOS = 120;
+
 function lerVendas() {
   const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('VENDAS E VALIDAÇÃO');
   if (!sh) return { diario: [], linhas: [] };
   const values = sh.getDataRange().getValues();
   if (values.length < 3) return { diario: [], linhas: [] };
 
-  // --- Bloco "diario": contratos por dia (colunas mapeadas pelo cabeçalho da linha 2) ---
+  const corte = new Date();
+  corte.setDate(corte.getDate() - VENDAS_DIAS_RETIDOS);
+  const dataMinima = Utilities.formatDate(corte, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+
+  // --- Bloco "diario": contratos por dia (colunas mapeadas pelo cabeçalho da linha 1;
+  //     esse bloco tem só uma linha de cabeçalho, dados já começam na linha 2) ---
   const idxDiario = {};
-  values[1].forEach((h, i) => {
+  values[0].forEach((h, i) => {
     const n = normHeader(h);
     if (n.includes('data')) idxDiario.data = i;
     else if (n.includes('vendas') && n.includes('sede')) idxDiario.sede = i;
@@ -333,9 +344,9 @@ function lerVendas() {
 
   const diario = [];
   if (idxDiario.data !== undefined) {
-    for (let i = 2; i < values.length; i++) {
+    for (let i = 1; i < values.length; i++) {
       const data = paraDataISO(values[i][idxDiario.data]);
-      if (!data) continue;
+      if (!data || data < dataMinima) continue;
       diario.push({
         data: data,
         sede: paraNumero(values[i][idxDiario.sede]),
@@ -353,7 +364,7 @@ function lerVendas() {
 
     // SEDE: A(0)=data, B(1)=A/F, C(2)=cliente, D(3)=status, E(4)=observacao, F(5)=validadora
     const dataSede = paraDataISO(r[0]);
-    if (dataSede) {
+    if (dataSede && dataSede >= dataMinima) {
       const status = normStatusVenda(r[3]);
       if (status) linhas.push({
         data: dataSede, canal: 'sede', isApta: ehApta(r[1]), status: status,
@@ -365,7 +376,7 @@ function lerVendas() {
 
     // FILIAL: G(6)=data, H(7)=A/F, I(8)=cliente, J(9)=status, K(10)=observacao, L(11)=validadora
     const dataFilial = paraDataISO(r[6]);
-    if (dataFilial) {
+    if (dataFilial && dataFilial >= dataMinima) {
       const status = normStatusVenda(r[9]);
       if (status) linhas.push({
         data: dataFilial, canal: 'filial', isApta: ehApta(r[7]), status: status,

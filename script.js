@@ -20,7 +20,7 @@
 /* ===== CONFIG DA API (Google Apps Script) =====
    Depois de implantar o Apps Script (ver apps-script-Code.gs),
    cole aqui a URL que termina em /exec                          */
-const SHEETS_API_URL = 'https://script.google.com/macros/s/AKfycbzCbNRSL9vyBpYI3rjNxz8a5cybZfh5t9e-vzc2dq9ZplbEw2bQT6L1i8gqykFLv5f_UA/exec';
+const SHEETS_API_URL = 'https://script.google.com/macros/s/AKfycbyl__Bz0e02z3-4ItoYsLE1skg7UosWwidC6g1aZ2D3fKH2dNTvTKX9YiYh5tliXfVw/exec';
 
 /* ===== VERSÃO ===== */
 const VERSAO = 'Beta 2.2';
