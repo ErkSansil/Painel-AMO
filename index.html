@@ -573,10 +573,10 @@
               Período
             </span>
             <div class="btn-group" id="vPeriodGroup">
-              <button class="btn-seg" data-val="hoje">Hoje</button>
+              <button class="btn-seg active" data-val="hoje">Hoje</button>
               <button class="btn-seg" data-val="ontem">Ontem</button>
               <button class="btn-seg" data-val="7d">7d</button>
-              <button class="btn-seg active" data-val="30d">30d</button>
+              <button class="btn-seg" data-val="30d">30d</button>
               <button class="btn-seg" data-val="60d">60d</button>
               <button class="btn-seg" data-val="90d">90d</button>
             </div>
@@ -659,38 +659,57 @@
           </label>
         </div>
 
-        <div class="table-controls">
-          <span id="vTableCount" class="table-count">Carregando...</span>
-          <div style="display:flex;align-items:center;gap:8px">
-            <label style="font-size:13px;color:var(--text-muted)">Linhas:</label>
-            <select id="vPageSize" class="page-size-select">
-              <option value="25" selected>25</option>
-              <option value="50">50</option>
-              <option value="100">100</option>
-              <option value="200">200</option>
-            </select>
+        <div class="table-card">
+          <div class="table-toolbar">
+            <div class="table-toolbar-left">
+              <span class="toolbar-label">Linhas por página:</span>
+              <select id="vPageSize" class="page-size-select">
+                <option value="25" selected>25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+                <option value="200">200</option>
+              </select>
+            </div>
+            <span class="table-count" id="vTableCount">Carregando...</span>
           </div>
-        </div>
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Data</th>
-                <th>Canal</th>
-                <th>Cliente</th>
-                <th>Observação</th>
-                <th>Validadora</th>
-                <th>Status</th>
-                <th>Tipo</th>
-              </tr>
-            </thead>
-            <tbody id="vTableBody"></tbody>
-          </table>
-        </div>
-        <div class="pagination">
-          <button class="btn-page" id="vBtnPrevPage">‹ Anterior</button>
-          <span id="vPageInfo">Página 1 de 1</span>
-          <button class="btn-page" id="vBtnNextPage">Próxima ›</button>
+          <div class="table-pagination">
+            <button class="btn-page" id="vBtnPrevPageTop">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+              Anterior
+            </button>
+            <span class="page-info" id="vPageInfoTop"></span>
+            <button class="btn-page" id="vBtnNextPageTop">
+              Próxima
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Canal</th>
+                  <th>Cliente</th>
+                  <th>Observação</th>
+                  <th>Validadora</th>
+                  <th>Status</th>
+                  <th>Tipo</th>
+                </tr>
+              </thead>
+              <tbody id="vTableBody"></tbody>
+            </table>
+          </div>
+          <div class="table-pagination">
+            <button class="btn-page" id="vBtnPrevPage">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+              Anterior
+            </button>
+            <span class="page-info" id="vPageInfo"></span>
+            <button class="btn-page" id="vBtnNextPage">
+              Próxima
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+          </div>
         </div>
       </section>
 

@@ -23,7 +23,7 @@
 const SHEETS_API_URL = 'https://script.google.com/macros/s/AKfycbzCbNRSL9vyBpYI3rjNxz8a5cybZfh5t9e-vzc2dq9ZplbEw2bQT6L1i8gqykFLv5f_UA/exec';
 
 /* ===== VERSÃO ===== */
-const VERSAO = 'Beta 2.0';
+const VERSAO = 'Beta 2.2';
 
 /* ===== STATE ===== */
 const state = {
@@ -90,12 +90,32 @@ const stateBreno = {
 
 const stateVendas = {
   filtroModo: 'periodo',
-  periodo: '30d',
+  periodo: 'hoje',
   dataEspecifica: null,
   intervalo: { de: null, ate: null },
   data: null,
   carregando: false,
 };
+
+/* ===== PERSISTÊNCIA DO FILTRO DE DATA (por painel) =====
+   Guarda a última escolha de período/data/intervalo no localStorage.
+   Se não houver nada salvo (ex: navegador limpou os dados), cada painel
+   usa o padrão definido no state acima ('hoje'). */
+function salvarFiltroData(chave, st) {
+  localStorage.setItem(chave, JSON.stringify({
+    filtroModo: st.filtroModo,
+    periodo: st.periodo,
+    dataEspecifica: st.dataEspecifica,
+    intervalo: st.intervalo,
+  }));
+}
+function carregarFiltroData(chave) {
+  try {
+    const salvo = JSON.parse(localStorage.getItem(chave));
+    if (salvo && salvo.filtroModo) return salvo;
+  } catch {}
+  return null;
+}
 
 // Estado separado para os filtros da tabela "por dia" de Vendas
 const stateVendasTab = {
@@ -620,14 +640,18 @@ async function doRefresh(silencioso = false) {
   if (!silencioso) {
     state.carregando = true;
     stateBreno.carregando = true;
+    stateVendas.carregando = true;
     renderCards();
     renderCardsBreno();
+    renderCardsVendas();
   }
   await fetchData();
   state.carregando = false;
   stateBreno.carregando = false;
+  stateVendas.carregando = false;
   renderCards();
   renderCardsBreno();
+  renderCardsVendas();
   updateTimestamps();
   startCountdown();
 }
@@ -714,6 +738,7 @@ document.getElementById('periodGroup').addEventListener('click', e => {
   document.querySelectorAll('#periodGroup .btn-seg').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   state.periodo = btn.dataset.val;
+  salvarFiltroData('filtroEder', state);
   doRefresh();
 });
 
@@ -740,6 +765,7 @@ inputDataEsp.addEventListener('change', () => {
   state.dataEspecifica = inputDataEsp.value;
   document.getElementById('labelDataEspecifica').textContent =
     new Date(inputDataEsp.value + 'T12:00:00').toLocaleDateString('pt-BR');
+  salvarFiltroData('filtroEder', state);
   doRefresh();
 });
 
@@ -764,6 +790,7 @@ document.getElementById('btnAplicarIntervalo').addEventListener('click', () => {
       `${new Date(de + 'T12:00:00').toLocaleDateString('pt-BR')} – ${new Date(ate + 'T12:00:00').toLocaleDateString('pt-BR')}`;
     intervaloDiv.classList.add('hidden');
     intervaloDiv.style.display = '';
+    salvarFiltroData('filtroEder', state);
     doRefresh();
   }
 });
@@ -802,6 +829,7 @@ document.getElementById('bPeriodGroup').addEventListener('click', e => {
   document.querySelectorAll('#bPeriodGroup .btn-seg').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   stateBreno.periodo = btn.dataset.val;
+  salvarFiltroData('filtroBreno', stateBreno);
   stateBreno.data = {
     sede: agregarRows(filtrarPorDataBreno(rawRowsBreno.sede)),
     filial: agregarRows(filtrarPorDataBreno(rawRowsBreno.filial)),
@@ -831,6 +859,7 @@ bInputDataEsp.addEventListener('change', () => {
   stateBreno.dataEspecifica = bInputDataEsp.value;
   document.getElementById('bLabelDataEspecifica').textContent =
     new Date(bInputDataEsp.value + 'T12:00:00').toLocaleDateString('pt-BR');
+  salvarFiltroData('filtroBreno', stateBreno);
   stateBreno.data = {
     sede: agregarRows(filtrarPorDataBreno(rawRowsBreno.sede)),
     filial: agregarRows(filtrarPorDataBreno(rawRowsBreno.filial)),
@@ -855,6 +884,7 @@ document.getElementById('bBtnAplicarIntervalo').addEventListener('click', () => 
       `${new Date(de + 'T12:00:00').toLocaleDateString('pt-BR')} – ${new Date(ate + 'T12:00:00').toLocaleDateString('pt-BR')}`;
     bIntervaloDiv.classList.add('hidden');
     bIntervaloDiv.style.display = '';
+    salvarFiltroData('filtroBreno', stateBreno);
     stateBreno.data = {
       sede: agregarRows(filtrarPorDataBreno(rawRowsBreno.sede)),
       filial: agregarRows(filtrarPorDataBreno(rawRowsBreno.filial)),
@@ -900,6 +930,7 @@ document.getElementById('vPeriodGroup').addEventListener('click', e => {
   document.querySelectorAll('#vPeriodGroup .btn-seg').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   stateVendas.periodo = btn.dataset.val;
+  salvarFiltroData('filtroVendas', stateVendas);
   stateVendas.data = agregarVendas(filtrarPorDataVendas(rawRowsVendas), filtrarPorDataVendas(rawDiarioVendas));
   renderCardsVendas();
 });
@@ -911,6 +942,7 @@ document.getElementById('vBtnDataEspecifica').addEventListener('click', () => {
 document.getElementById('vInputDataEspecifica').addEventListener('change', e => {
   stateVendas.dataEspecifica = e.target.value;
   document.getElementById('vLabelDataEspecifica').textContent = new Date(e.target.value+'T12:00:00').toLocaleDateString('pt-BR');
+  salvarFiltroData('filtroVendas', stateVendas);
   stateVendas.data = agregarVendas(filtrarPorDataVendas(rawRowsVendas), filtrarPorDataVendas(rawDiarioVendas));
   renderCardsVendas();
 });
@@ -924,6 +956,7 @@ document.getElementById('vBtnAplicarIntervalo').addEventListener('click', () => 
   stateVendas.intervalo = { de, ate };
   document.getElementById('vLabelIntervalo').textContent = `${new Date(de+'T12:00:00').toLocaleDateString('pt-BR')} até ${new Date(ate+'T12:00:00').toLocaleDateString('pt-BR')}`;
   document.getElementById('vIntervaloInputs').classList.add('hidden');
+  salvarFiltroData('filtroVendas', stateVendas);
   stateVendas.data = agregarVendas(filtrarPorDataVendas(rawRowsVendas), filtrarPorDataVendas(rawDiarioVendas));
   renderCardsVendas();
 });
@@ -951,13 +984,17 @@ document.getElementById('vPageSize').addEventListener('change', e => {
   tableStateVendas.page = 1;
   renderTableVendas();
 });
-document.getElementById('vBtnPrevPage').addEventListener('click', () => {
+function vPaginaAnterior() {
   if (tableStateVendas.page > 1) { tableStateVendas.page--; renderTableVendas(); }
-});
-document.getElementById('vBtnNextPage').addEventListener('click', () => {
+}
+function vProximaPagina() {
   const tp = Math.ceil(tableStateVendas.rows.length / tableStateVendas.pageSize);
   if (tableStateVendas.page < tp) { tableStateVendas.page++; renderTableVendas(); }
-});
+}
+document.getElementById('vBtnPrevPage').addEventListener('click', vPaginaAnterior);
+document.getElementById('vBtnNextPage').addEventListener('click', vProximaPagina);
+document.getElementById('vBtnPrevPageTop').addEventListener('click', vPaginaAnterior);
+document.getElementById('vBtnNextPageTop').addEventListener('click', vProximaPagina);
 
 /* ===== DARK MODE ===== */
 document.getElementById('darkToggle').addEventListener('click', () => {
@@ -2245,23 +2282,64 @@ function renderTableVendas() {
 
   const countEl = document.getElementById('vTableCount');
   if (countEl) countEl.textContent = total ? `Exibindo ${ini+1}–${fim} de ${fmtNum(total)} registros` : 'Nenhum registro';
-  const pageInfoEl = document.getElementById('vPageInfo');
-  if (pageInfoEl) pageInfoEl.textContent = `Página ${tableStateVendas.page} de ${totalPages}`;
-  const prevBtn = document.getElementById('vBtnPrevPage');
-  const nextBtn = document.getElementById('vBtnNextPage');
-  if (prevBtn) prevBtn.disabled = tableStateVendas.page <= 1;
-  if (nextBtn) nextBtn.disabled = tableStateVendas.page >= totalPages;
+  const infoTxt = `Página ${tableStateVendas.page} de ${totalPages}`;
+  ['vPageInfo', 'vPageInfoTop'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = infoTxt;
+  });
+  ['vBtnPrevPage', 'vBtnPrevPageTop'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = tableStateVendas.page <= 1;
+  });
+  ['vBtnNextPage', 'vBtnNextPageTop'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = tableStateVendas.page >= totalPages;
+  });
 }
 
 /* ===== INIT ===== */
 if (sessao.usuario) aplicarSessao();
-setFiltroModo('periodo');
-document.querySelector('#periodGroup .btn-seg[data-val="hoje"]').classList.add('active');
-state.periodo = 'hoje';
+
+/** Restaura o filtro salvo (ou mantém o padrão 'hoje' do state) e sincroniza a UI */
+function restaurarFiltro(chave, st, setModo, ids) {
+  const salvo = carregarFiltroData(chave);
+  if (salvo) Object.assign(st, salvo);
+  setModo(st.filtroModo);
+
+  if (st.filtroModo === 'periodo' && st.periodo) {
+    document.querySelectorAll(`#${ids.periodGroup} .btn-seg`).forEach(b => b.classList.remove('active'));
+    const btn = document.querySelector(`#${ids.periodGroup} .btn-seg[data-val="${st.periodo}"]`);
+    if (btn) btn.classList.add('active');
+  } else if (st.filtroModo === 'data' && st.dataEspecifica) {
+    const input = document.getElementById(ids.inputData);
+    const label = document.getElementById(ids.labelData);
+    if (input) input.value = st.dataEspecifica;
+    if (label) label.textContent = new Date(st.dataEspecifica + 'T12:00:00').toLocaleDateString('pt-BR');
+  } else if (st.filtroModo === 'intervalo' && st.intervalo.de && st.intervalo.ate) {
+    const inputDe = document.getElementById(ids.inputDe);
+    const inputAte = document.getElementById(ids.inputAte);
+    const label = document.getElementById(ids.labelIntervalo);
+    if (inputDe) inputDe.value = st.intervalo.de;
+    if (inputAte) inputAte.value = st.intervalo.ate;
+    if (label) label.textContent =
+      `${new Date(st.intervalo.de + 'T12:00:00').toLocaleDateString('pt-BR')} até ${new Date(st.intervalo.ate + 'T12:00:00').toLocaleDateString('pt-BR')}`;
+  }
+}
+
+restaurarFiltro('filtroEder', state, setFiltroModo, {
+  periodGroup: 'periodGroup', inputData: 'inputDataEspecifica', labelData: 'labelDataEspecifica',
+  inputDe: 'inputDe', inputAte: 'inputAte', labelIntervalo: 'labelIntervalo',
+});
 doRefresh();
-setFiltroModoBreno('periodo');
-const bPeriodBtn = document.querySelector('#bPeriodGroup .btn-seg[data-val="hoje"]');
-if (bPeriodBtn) bPeriodBtn.classList.add('active');
-stateBreno.periodo = 'hoje';
+
+restaurarFiltro('filtroBreno', stateBreno, setFiltroModoBreno, {
+  periodGroup: 'bPeriodGroup', inputData: 'bInputDataEspecifica', labelData: 'bLabelDataEspecifica',
+  inputDe: 'bInputDe', inputAte: 'bInputAte', labelIntervalo: 'bLabelIntervalo',
+});
 renderCardsBreno();
 renderTableBreno();
+
+restaurarFiltro('filtroVendas', stateVendas, setFiltroModoVendas, {
+  periodGroup: 'vPeriodGroup', inputData: 'vInputDataEspecifica', labelData: 'vLabelDataEspecifica',
+  inputDe: 'vInputDe', inputAte: 'vInputAte', labelIntervalo: 'vLabelIntervalo',
+});
