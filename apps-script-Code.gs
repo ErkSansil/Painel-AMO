@@ -291,15 +291,27 @@ function lerDiario(nomeAba) {
   return rows;
 }
 
-/** true se a coluna A/F marca o registro como Apta (contém "Apta", ex: "Apta FUTURA") */
-function ehApta(v) {
-  return normHeader(v).includes('apta');
+/** true se a coluna A/F for exatamente "Apta FUTURA" (comparação exata, sem busca por trecho) */
+function ehAptaPorAF(v) {
+  return normHeader(v) === 'aptafutura';
 }
 
-/** Normaliza o status de validação de uma linha; '' se não for um dos três reconhecidos */
+/** true se o nome do cliente começar com o prefixo "(APTA" — ex: "(APTA.) Fulana de Tal" */
+function ehAptaPorNome(nome) {
+  return String(nome || '').trim().toUpperCase().indexOf('(APTA') === 0;
+}
+
+/** true se o status for exatamente "Aptas A/C" — variante que já vem marcada como Apta */
+function ehAptaPorStatus(statusBruto) {
+  return normHeader(statusBruto) === 'aptasac';
+}
+
+/** Normaliza o status de validação de uma linha; '' se não for um dos reconhecidos.
+ *  "Aptas A/C" é tratado como um alias de VALIDADA (contrato Apta já validado). */
 function normStatusVenda(v) {
   const n = normHeader(v);
   if (n === 'validada') return 'VALIDADA';
+  if (n === 'aptasac') return 'VALIDADA';
   if (n === 'cancelada') return 'CANCELADA';
   if (n === 'naovalidada') return 'NAO_VALIDADA';
   return '';
@@ -330,59 +342,72 @@ function lerVendas() {
   corte.setDate(corte.getDate() - VENDAS_DIAS_RETIDOS);
   const dataMinima = Utilities.formatDate(corte, Session.getScriptTimeZone(), 'yyyy-MM-dd');
 
-  // --- Bloco "diario": contratos por dia (colunas mapeadas pelo cabeçalho da linha 1;
-  //     esse bloco tem só uma linha de cabeçalho, dados já começam na linha 2) ---
-  const idxDiario = {};
-  values[0].forEach((h, i) => {
-    const n = normHeader(h);
-    if (n.includes('data')) idxDiario.data = i;
-    else if (n.includes('vendas') && n.includes('sede')) idxDiario.sede = i;
-    else if (n.includes('sede') && n.includes('apta')) idxDiario.sedeAptas = i;
-    else if (n.includes('vendas') && n.includes('filial')) idxDiario.filial = i;
-    else if (n.includes('filial') && n.includes('apta')) idxDiario.filialAptas = i;
-  });
+  // --- Bloco "diario": contratos por dia — colunas FIXAS, sem busca por cabeçalho.
+  //     N(13)=data, O(14)=vendas sede, P(15)=sede aptas, Q(16)=vendas filial, R(17)=filial aptas.
+  //     Cabeçalho só na linha 1; dados começam na linha 2 (N2:R2 em diante). ---
+  const COL_DIARIO_DATA = 13;
+  const COL_DIARIO_SEDE = 14;
+  const COL_DIARIO_SEDE_APTAS = 15;
+  const COL_DIARIO_FILIAL = 16;
+  const COL_DIARIO_FILIAL_APTAS = 17;
 
   const diario = [];
-  if (idxDiario.data !== undefined) {
-    for (let i = 1; i < values.length; i++) {
-      const data = paraDataISO(values[i][idxDiario.data]);
-      if (!data || data < dataMinima) continue;
-      diario.push({
-        data: data,
-        sede: paraNumero(values[i][idxDiario.sede]),
-        sedeAptas: paraNumero(values[i][idxDiario.sedeAptas]),
-        filial: paraNumero(values[i][idxDiario.filial]),
-        filialAptas: paraNumero(values[i][idxDiario.filialAptas]),
-      });
-    }
+  for (let i = 1; i < values.length; i++) {
+    const data = paraDataISO(values[i][COL_DIARIO_DATA]);
+    if (!data || data < dataMinima) continue;
+    diario.push({
+      data: data,
+      sede: paraNumero(values[i][COL_DIARIO_SEDE]),
+      sedeAptas: paraNumero(values[i][COL_DIARIO_SEDE_APTAS]),
+      filial: paraNumero(values[i][COL_DIARIO_FILIAL]),
+      filialAptas: paraNumero(values[i][COL_DIARIO_FILIAL_APTAS]),
+    });
   }
 
-  // --- Bloco "linhas": um registro por contrato (dados a partir da linha 3) ---
+  // --- Bloco "linhas": um registro por contrato — colunas FIXAS, sem busca por cabeçalho.
+  //     Dados a partir da linha 3 (i=2). ---
+  const COL_SEDE_DATA = 0;         // A
+  const COL_SEDE_AF = 1;           // B
+  const COL_SEDE_CLIENTE = 2;      // C
+  const COL_SEDE_STATUS = 3;       // D
+  const COL_SEDE_OBSERVACAO = 4;   // E
+  const COL_SEDE_VALIDADORA = 5;   // F
+  const COL_FILIAL_DATA = 6;       // G
+  const COL_FILIAL_AF = 7;         // H
+  const COL_FILIAL_CLIENTE = 8;    // I
+  const COL_FILIAL_STATUS = 9;     // J
+  const COL_FILIAL_OBSERVACAO = 10; // K
+  const COL_FILIAL_VALIDADORA = 11; // L
+
   const linhas = [];
   for (let i = 2; i < values.length; i++) {
     const r = values[i];
 
-    // SEDE: A(0)=data, B(1)=A/F, C(2)=cliente, D(3)=status, E(4)=observacao, F(5)=validadora
-    const dataSede = paraDataISO(r[0]);
+    const dataSede = paraDataISO(r[COL_SEDE_DATA]);
     if (dataSede && dataSede >= dataMinima) {
-      const status = normStatusVenda(r[3]);
+      const status = normStatusVenda(r[COL_SEDE_STATUS]);
+      const isApta = ehAptaPorAF(r[COL_SEDE_AF])
+        || ehAptaPorNome(r[COL_SEDE_CLIENTE])
+        || ehAptaPorStatus(r[COL_SEDE_STATUS]);
       if (status) linhas.push({
-        data: dataSede, canal: 'sede', isApta: ehApta(r[1]), status: status,
-        cliente: String(r[2] || '').trim(),
-        observacao: String(r[4] || '').trim(),
-        validadora: String(r[5] || '').trim(),
+        data: dataSede, canal: 'sede', isApta: isApta, status: status,
+        cliente: String(r[COL_SEDE_CLIENTE] || '').trim(),
+        observacao: String(r[COL_SEDE_OBSERVACAO] || '').trim(),
+        validadora: String(r[COL_SEDE_VALIDADORA] || '').trim(),
       });
     }
 
-    // FILIAL: G(6)=data, H(7)=A/F, I(8)=cliente, J(9)=status, K(10)=observacao, L(11)=validadora
-    const dataFilial = paraDataISO(r[6]);
+    const dataFilial = paraDataISO(r[COL_FILIAL_DATA]);
     if (dataFilial && dataFilial >= dataMinima) {
-      const status = normStatusVenda(r[9]);
+      const status = normStatusVenda(r[COL_FILIAL_STATUS]);
+      const isApta = ehAptaPorAF(r[COL_FILIAL_AF])
+        || ehAptaPorNome(r[COL_FILIAL_CLIENTE])
+        || ehAptaPorStatus(r[COL_FILIAL_STATUS]);
       if (status) linhas.push({
-        data: dataFilial, canal: 'filial', isApta: ehApta(r[7]), status: status,
-        cliente: String(r[8] || '').trim(),
-        observacao: String(r[10] || '').trim(),
-        validadora: String(r[11] || '').trim(),
+        data: dataFilial, canal: 'filial', isApta: isApta, status: status,
+        cliente: String(r[COL_FILIAL_CLIENTE] || '').trim(),
+        observacao: String(r[COL_FILIAL_OBSERVACAO] || '').trim(),
+        validadora: String(r[COL_FILIAL_VALIDADORA] || '').trim(),
       });
     }
   }
