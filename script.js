@@ -739,7 +739,12 @@ document.getElementById('periodGroup').addEventListener('click', e => {
   btn.classList.add('active');
   state.periodo = btn.dataset.val;
   salvarFiltroData('filtroEder', state);
-  doRefresh();
+  state.data = {
+    sede: agregarRows(filtrarPorData(rawRows.sede)),
+    filial: agregarRows(filtrarPorData(rawRows.filial)),
+  };
+  atualizarTabelaDiaria();
+  renderCards();
 });
 
 /* ===== CANAL ===== */
@@ -766,7 +771,12 @@ inputDataEsp.addEventListener('change', () => {
   document.getElementById('labelDataEspecifica').textContent =
     new Date(inputDataEsp.value + 'T12:00:00').toLocaleDateString('pt-BR');
   salvarFiltroData('filtroEder', state);
-  doRefresh();
+  state.data = {
+    sede: agregarRows(filtrarPorData(rawRows.sede)),
+    filial: agregarRows(filtrarPorData(rawRows.filial)),
+  };
+  atualizarTabelaDiaria();
+  renderCards();
 });
 
 /* ===== INTERVALO ===== */
@@ -791,7 +801,12 @@ document.getElementById('btnAplicarIntervalo').addEventListener('click', () => {
     intervaloDiv.classList.add('hidden');
     intervaloDiv.style.display = '';
     salvarFiltroData('filtroEder', state);
-    doRefresh();
+    state.data = {
+      sede: agregarRows(filtrarPorData(rawRows.sede)),
+      filial: agregarRows(filtrarPorData(rawRows.filial)),
+    };
+    atualizarTabelaDiaria();
+    renderCards();
   }
 });
 
